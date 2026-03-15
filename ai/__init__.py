@@ -1,0 +1,1 @@
+"""AI module — LLM client, job matching, resume tailoring, cover letters."""

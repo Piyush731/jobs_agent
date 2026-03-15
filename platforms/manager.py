@@ -1156,10 +1156,8 @@ class PlatformManager:
 
             # Update platform session daily count
             db.update_platform_session(platform, {
-                "daily_applied": db.get_platform_session(platform)
-                .get("daily_applied", 0) + 1,
-                "total_applied": db.get_platform_session(platform)
-                .get("total_applied", 0) + 1,
+                "daily_applied": db.get_platform_session(platform).get("daily_applied", 0) + 1,
+                "total_applied": db.get_platform_session(platform).get("total_applied", 0) + 1,
             })
 
         except Exception as e:

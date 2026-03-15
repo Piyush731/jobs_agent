@@ -2,7 +2,6 @@
 venv/
 browser_profiles/
 resume/output/
-venv/
 __pycache__/
 logs/
 data/

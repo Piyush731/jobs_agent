@@ -418,12 +418,15 @@ class NaukriPlatform(PlatformBase):
     PLATFORM_NAME = "naukri"
 
     def __init__(self, browser_engine, notifier=None):
-        super().__init__(browser_engine)             # ← base only takes 1 arg
-        self.notifier = notifier                     # ← store notifier ourselves
+        super().__init__(browser_engine)
+        self.notifier = notifier
         self.platform_name = self.PLATFORM_NAME
+
+        if not hasattr(self, 'browser'):
+            self.browser = browser_engine
         self._page = None
         self._naukri_config = PLATFORM_CONFIG.get("naukri", {})
-        self._current_job = None   # set during apply flow
+        self._current_job = None
         logger.info("NaukriPlatform initialized")
 
     # ═══════════════════════════════════════════════════════════

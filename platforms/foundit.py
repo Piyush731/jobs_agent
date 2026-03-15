@@ -535,9 +535,14 @@ class FounditPlatform(PlatformBase):
     PLATFORM_NAME = "foundit"
 
     def __init__(self, browser_engine, notifier=None):
-        super().__init__(browser_engine)         # base takes 1 arg only
-        self.notifier = notifier                 # store separately
+        super().__init__(browser_engine)
+        self.notifier = notifier
         self.platform_name = self.PLATFORM_NAME
+        
+        # ── FIX: ensure self.browser exists ──
+        if not hasattr(self, 'browser'):
+            self.browser = browser_engine
+        
         self._page = None
         self._foundit_config = PLATFORM_CONFIG.get("foundit", {})
         self._current_job = None

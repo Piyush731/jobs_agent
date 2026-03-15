@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-platforms/indeed.py — Indeed Platform Integration
+platforms/indeed.py — Indeed Platform Integration (SYNCHRONOUS)
 
 Auth: Cookie-based ONLY.  No password stored.
   • First run → visible browser + Telegram alert → user logs in via Google /
@@ -27,7 +27,6 @@ import re
 import json
 import time
 import random
-import asyncio
 import traceback as tb_module
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -49,7 +48,9 @@ from config import (
 try:
     from profile.answers import get_answer, get_salary_answer, get_standard
 except ImportError:
-    get_answer = get_salary_answer = get_standard = None  # type: ignore[assignment]
+    get_answer = get_salary_answer = get_standard = None
+
+logger = get_logger("platforms.indeed")
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -58,8 +59,6 @@ except ImportError:
 _BASE_URL = "https://in.indeed.com"
 _SEARCH_URL = f"{_BASE_URL}/jobs"
 
-# Multiple selectors per element — tried in order until one succeeds.
-# Keeps the scraper resilient against Indeed's frequent DOM changes.
 _SEL: Dict[str, List[str]] = {
     # ── Search page ────────────────────────────────────────────────────
     "search_input": [
@@ -257,232 +256,192 @@ _SEL: Dict[str, List[str]] = {
 
 # Skills regex patterns for extraction from JD text
 _SKILL_PATTERNS: List[str] = [
-    r"\bJava\b",
-    r"\bPython\b",
-    r"\bJavaScript\b",
-    r"\bTypeScript\b",
-    r"\bReact(?:\.js|JS)?\b",
-    r"\bAngular(?:\.js|JS)?\b",
-    r"\bVue(?:\.js|JS)?\b",
-    r"\bNode(?:\.js|JS)?\b",
-    r"\bExpress(?:\.js|JS)?\b",
-    r"\bNuxt(?:\.js|JS)?\b",
-    r"\bNext(?:\.js|JS)?\b",
-    r"\bSpring\s*Boot\b",
-    r"\bSpring\b",
-    r"\bDjango\b",
-    r"\bFlask\b",
-    r"\bFastAPI\b",
-    r"\bMySQL\b",
-    r"\bPostgreSQL\b",
-    r"\bMongoDB\b",
-    r"\bRedis\b",
-    r"\bDocker\b",
-    r"\bKubernetes\b",
-    r"\bAWS\b",
-    r"\bAzure\b",
-    r"\bGCP\b",
-    r"\bGit\b",
-    r"\bLinux\b",
-    r"\bREST\s*API[s]?\b",
-    r"\bGraphQL\b",
-    r"\bKafka\b",
-    r"\bRabbitMQ\b",
-    r"\bElasticsearch\b",
-    r"\bHTML\b",
-    r"\bCSS\b",
-    r"\bTailwind\b",
-    r"\bBootstrap\b",
-    r"\bSQL\b",
-    r"\bNoSQL\b",
-    r"\bC\+\+\b",
-    r"\bC#\b",
-    r"\bGo(?:lang)?\b",
-    r"\bRust\b",
-    r"\bScala\b",
-    r"\bKotlin\b",
-    r"\bSwift\b",
-    r"\bMicroservices?\b",
-    r"\bCI/CD\b",
-    r"\bJenkins\b",
-    r"\bTerraform\b",
-    r"\bAnsible\b",
-    r"\bAgile\b",
-    r"\bScrum\b",
-    r"\bJIRA\b",
-    r"\bConfluence\b",
-    r"\bMachine\s*Learning\b",
-    r"\bDeep\s*Learning\b",
-    r"\bNLP\b",
-    r"\bTensorFlow\b",
-    r"\bPyTorch\b",
-    r"\bWebSocket[s]?\b",
-    r"\bJWT\b",
-    r"\bOAuth\b",
-    r"\bHibernate\b",
-    r"\bJPA\b",
-    r"\bMaven\b",
-    r"\bGradle\b",
-    r"\bRazorpay\b",
-    r"\bStripe\b",
+    r"\bJava\b", r"\bPython\b", r"\bJavaScript\b", r"\bTypeScript\b",
+    r"\bReact(?:\.js|JS)?\b", r"\bAngular(?:\.js|JS)?\b",
+    r"\bVue(?:\.js|JS)?\b", r"\bNode(?:\.js|JS)?\b",
+    r"\bExpress(?:\.js|JS)?\b", r"\bNuxt(?:\.js|JS)?\b",
+    r"\bNext(?:\.js|JS)?\b", r"\bSpring\s*Boot\b", r"\bSpring\b",
+    r"\bDjango\b", r"\bFlask\b", r"\bFastAPI\b",
+    r"\bMySQL\b", r"\bPostgreSQL\b", r"\bMongoDB\b", r"\bRedis\b",
+    r"\bDocker\b", r"\bKubernetes\b", r"\bAWS\b", r"\bAzure\b",
+    r"\bGCP\b", r"\bGit\b", r"\bLinux\b",
+    r"\bREST\s*API[s]?\b", r"\bGraphQL\b", r"\bKafka\b",
+    r"\bRabbitMQ\b", r"\bElasticsearch\b",
+    r"\bHTML\b", r"\bCSS\b", r"\bTailwind\b", r"\bBootstrap\b",
+    r"\bSQL\b", r"\bNoSQL\b", r"\bC\+\+\b", r"\bC#\b",
+    r"\bGo(?:lang)?\b", r"\bRust\b", r"\bScala\b", r"\bKotlin\b",
+    r"\bSwift\b", r"\bMicroservices?\b", r"\bCI/CD\b",
+    r"\bJenkins\b", r"\bTerraform\b", r"\bAnsible\b",
+    r"\bAgile\b", r"\bScrum\b", r"\bJIRA\b", r"\bConfluence\b",
+    r"\bMachine\s*Learning\b", r"\bDeep\s*Learning\b", r"\bNLP\b",
+    r"\bTensorFlow\b", r"\bPyTorch\b",
+    r"\bWebSocket[s]?\b", r"\bJWT\b", r"\bOAuth\b",
+    r"\bHibernate\b", r"\bJPA\b", r"\bMaven\b", r"\bGradle\b",
+    r"\bRazorpay\b", r"\bStripe\b",
 ]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# HELPERS
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _find(page, key: str, timeout: int = 5000):
+    """Return first visible element matching any selector in _SEL[key]."""
+    for sel in _SEL.get(key, []):
+        try:
+            el = page.wait_for_selector(sel, timeout=timeout, state="visible")
+            if el:
+                return el
+        except Exception:
+            continue
+    return None
+
+
+def _find_all(page, key: str, timeout: int = 5000) -> list:
+    """Return all elements for first working selector in _SEL[key]."""
+    for sel in _SEL.get(key, []):
+        try:
+            page.wait_for_selector(sel, timeout=timeout, state="visible")
+            els = page.query_selector_all(sel)
+            if els:
+                return els
+        except Exception:
+            continue
+    return []
+
+
+def _txt(el) -> str:
+    """Safely extract trimmed text from an element."""
+    if el is None:
+        return ""
+    try:
+        t = el.inner_text()
+        return (t or "").strip()
+    except Exception:
+        try:
+            t = el.text_content()
+            return (t or "").strip()
+        except Exception:
+            return ""
+
+
+def _attr(el, name: str) -> str:
+    """Safely get an attribute value."""
+    if el is None:
+        return ""
+    try:
+        v = el.get_attribute(name)
+        return (v or "").strip()
+    except Exception:
+        return ""
+
+
+def _css_for(el) -> str:
+    """Best-effort CSS selector for an element."""
+    try:
+        eid = el.get_attribute("id")
+        if eid:
+            return f"#{eid}"
+        dtid = el.get_attribute("data-testid")
+        if dtid:
+            return f'[data-testid="{dtid}"]'
+        tag = el.evaluate("e=>e.tagName.toLowerCase()")
+        name = el.get_attribute("name")
+        if name:
+            return f'{tag}[name="{name}"]'
+        txt = _txt(el)
+        if txt and len(txt) < 40:
+            safe = txt.replace('"', '\\"')[:35]
+            return f'{tag}:has-text("{safe}")'
+        cls = el.get_attribute("class")
+        if cls:
+            return f"{tag}.{cls.split()[0]}"
+    except Exception:
+        pass
+    return "button:visible"
+
+
+def _extract_skills(text: str) -> List[str]:
+    """Extract skill names from text using regex patterns."""
+    found = []
+    for pat in _SKILL_PATTERNS:
+        m = re.search(pat, text, re.IGNORECASE)
+        if m:
+            found.append(m.group(0))
+    return list(set(found))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # IndeedPlatform
 # ═══════════════════════════════════════════════════════════════════════════
 
-
 class IndeedPlatform(PlatformBase):
     """
-    Indeed job-platform adapter.
+    Indeed job-platform adapter (SYNCHRONOUS — matches browser.py).
 
-    Authentication
-    ──────────────
-    Cookie-based only — **no** password is stored.  On first run (or when
-    cookies expire) the agent opens a *visible* browser window and sends a
-    Telegram alert so the user can log in via Google / magic-link.  Cookies
-    are persisted to ``browser_profiles/indeed/`` for subsequent runs.
-
-    Limits
-    ──────
-    • 20 applications / day
-    • ≥3-minute gap between applications
-    • Auto-cooldown on CAPTCHA / ban detection
+    Authentication: Cookie-based only — no password stored.
+    Limits: 20 applications/day, ≥3 min gap, auto-cooldown on issues.
     """
 
-    PLATFORM = "indeed"
-
-    # ─── init ──────────────────────────────────────────────────────────
+    PLATFORM_NAME = "indeed"
 
     def __init__(self, browser_engine, notifier=None):
-        """
-        Parameters
-        ----------
-        browser_engine : BrowserEngine
-            Shared browser engine (from ``core/browser.py``).
-        notifier : JobNotifier | None
-            Telegram notifier (from ``tracking/notifications.py``).
-        """
-        super().__init__(browser_engine, notifier)
-        self.platform_name: str = self.PLATFORM
-        self.logger = get_logger("IndeedPlatform")
+        super().__init__(browser_engine)
+        self.notifier = notifier
+        self.platform_name = self.PLATFORM_NAME
+
+        # Ensure self.browser exists
+        if not hasattr(self, 'browser'):
+            self.browser = browser_engine
+
         self.db = get_db()
 
-        # Platform config from config.py
+        # Platform config
         cfg = PLATFORM_CONFIG.get("indeed", {})
         self.max_daily: int = cfg.get("max_daily_applications", 20)
         _rl = cfg.get("rate_limit_seconds", {"min": 180, "max": 360})
         if isinstance(_rl, dict):
-            self._gap_min: int = _rl.get("min", 180)
-            self._gap_max: int = _rl.get("max", 360)
+            self._gap_min = _rl.get("min", 180)
+            self._gap_max = _rl.get("max", 360)
         elif isinstance(_rl, (int, float)):
             self._gap_min = int(_rl)
             self._gap_max = int(_rl) + 120
         else:
             self._gap_min, self._gap_max = 180, 360
 
-        self.search_queries: List[str] = cfg.get(
-            "search_queries",
-            [
-                "software developer",
-                "full stack developer",
-                "backend developer",
-                "java developer",
-                "node.js developer",
-                "SDE",
-                "python developer",
-            ],
-        )
+        self.search_queries: List[str] = cfg.get("search_queries", [
+            "software developer", "full stack developer",
+            "backend developer", "java developer",
+            "node.js developer", "SDE", "python developer",
+        ])
         self.max_pages: int = cfg.get("max_pages_per_query", 3)
 
         # Runtime state
-        self.page = None  # current Playwright Page
+        self._page = None
         self._last_apply_ts: Optional[datetime] = None
-        self._prepared: Dict[str, Dict] = {}  # job_id → state
+        self._prepared: Dict[str, Dict] = {}
 
-        self.logger.info("IndeedPlatform initialised  (max %d/day, gap %d-%ds)",
-                         self.max_daily, self._gap_min, self._gap_max)
+        logger.info("IndeedPlatform initialised (max %d/day, gap %d-%ds)",
+                     self.max_daily, self._gap_min, self._gap_max)
 
     # ═══════════════════════════════════════════════════════════════════
-    #  INTERNAL HELPERS — element lookup, text extraction, popups
+    # INTERNAL HELPERS
     # ═══════════════════════════════════════════════════════════════════
 
-    async def _el(self, page, key: str, timeout: int = 5000):
-        """Return first visible element matching any selector in ``_SEL[key]``."""
-        for sel in _SEL.get(key, []):
+    def _get_page(self):
+        """Get or launch the Indeed browser page."""
+        if self._page is not None:
             try:
-                el = await page.wait_for_selector(sel, timeout=timeout, state="visible")
-                if el:
-                    return el
+                if not self._page.is_closed():
+                    _ = self._page.url
+                    return self._page
             except Exception:
-                continue
-        return None
+                pass
+        self._page = self.browser.launch(self.PLATFORM_NAME)
+        return self._page
 
-    async def _els(self, page, key: str, timeout: int = 5000) -> List:
-        """Return **all** visible elements for the first working selector."""
-        for sel in _SEL.get(key, []):
-            try:
-                await page.wait_for_selector(sel, timeout=timeout, state="visible")
-                els = await page.query_selector_all(sel)
-                if els:
-                    return els
-            except Exception:
-                continue
-        return []
-
-    @staticmethod
-    async def _txt(el) -> str:
-        """Safely extract trimmed inner-text from an element handle."""
-        if el is None:
-            return ""
-        try:
-            t = await el.inner_text()
-            return (t or "").strip()
-        except Exception:
-            try:
-                t = await el.text_content()
-                return (t or "").strip()
-            except Exception:
-                return ""
-
-    @staticmethod
-    async def _attr(el, name: str) -> str:
-        """Safely get an attribute value."""
-        if el is None:
-            return ""
-        try:
-            v = await el.get_attribute(name)
-            return (v or "").strip()
-        except Exception:
-            return ""
-
-    async def _css_for(self, el) -> str:
-        """Best-effort CSS selector for an element (for ``click_human`` etc.)."""
-        try:
-            eid = await el.get_attribute("id")
-            if eid:
-                return f"#{eid}"
-            dtid = await el.get_attribute("data-testid")
-            if dtid:
-                return f'[data-testid="{dtid}"]'
-            tag = await el.evaluate("e=>e.tagName.toLowerCase()")
-            name = await el.get_attribute("name")
-            if name:
-                return f'{tag}[name="{name}"]'
-            txt = await self._txt(el)
-            if txt and len(txt) < 40:
-                safe = txt.replace('"', '\\"')[:35]
-                return f'{tag}:has-text("{safe}")'
-            cls = await el.get_attribute("class")
-            if cls:
-                return f"{tag}.{cls.split()[0]}"
-        except Exception:
-            pass
-        return "button:visible"
-
-    async def _dismiss_popups(self, page):
-        """Click away cookie banners, overlays, "no-thanks" dialogs."""
+    def _dismiss_popups(self, page) -> None:
+        """Click away cookie banners, overlays, dialogs."""
         targets = (
             _SEL.get("close_popup", [])
             + _SEL.get("cookie_accept", [])
@@ -492,133 +451,97 @@ class IndeedPlatform(PlatformBase):
                 'button:has-text("Dismiss")',
                 'button:has-text("Skip")',
                 '[aria-label="Close"]',
-                "button.gnav-LoggedOutAccountLink-close",
             ]
         )
         for sel in targets:
             try:
-                el = await page.wait_for_selector(sel, timeout=1200, state="visible")
-                if el:
-                    await el.click()
-                    await self._rand(0.3, 1.0)
+                if self.browser.element_visible(page, sel):
+                    page.click(sel, timeout=2000)
+                    time.sleep(random.uniform(0.3, 1.0))
             except Exception:
                 continue
 
-    # ── tiny helpers ───────────────────────────────────────────────────
-
-    async def _rand(self, lo: float = 1.0, hi: float = 3.0):
-        """Async random sleep — delegates to browser_engine when possible."""
-        try:
-            await self.browser_engine.random_delay(lo, hi)
-        except Exception:
-            await asyncio.sleep(random.uniform(lo, hi))
-
-    async def _screenshot(self, page, label: str) -> str:
-        """Take a screenshot; swallow errors."""
-        try:
-            return await self.browser_engine.take_screenshot(page, label)
-        except Exception:
-            return ""
-
-    def _stealth_range(self) -> Tuple[float, float]:
-        rng = STEALTH_CONFIG.get("random_delay_range", (3, 12))
-        return (rng[0], rng[1]) if isinstance(rng, (list, tuple)) else (3, 12)
-
-    async def _human_scroll(self, page, rounds: int = 3):
-        """Scroll page incrementally like a human reading."""
+    def _human_scroll(self, page, rounds: int = 3) -> None:
+        """Scroll page like a human reading."""
         for _ in range(rounds):
-            dy = random.randint(200, 550)
-            await page.evaluate(f"window.scrollBy(0,{dy})")
-            await self._rand(0.6, 2.0)
+            self.browser.scroll_page(page, "down",
+                                     random.randint(200, 550))
+            self.browser.random_delay(0.6, 2.0)
 
-    async def _close_extra_tabs(self):
+    def _close_extra_tabs(self, page) -> None:
         """Keep only the first tab open."""
         try:
-            for p in self.page.context.pages[1:]:
-                await p.close()
+            context = page.context
+            for p in context.pages[1:]:
+                p.close()
         except Exception:
             pass
 
     # ═══════════════════════════════════════════════════════════════════
-    #  LOGIN  (cookie-based)
+    # LOGIN (cookie-based)
     # ═══════════════════════════════════════════════════════════════════
 
-    async def login(self) -> bool:
+    def login(self) -> bool:
         """
-        Authenticate to Indeed.
+        Authenticate to Indeed via saved cookies.
 
-        1. Launch visible browser for ``indeed`` profile.
-        2. Load saved cookies and navigate to homepage.
-        3. If logged in → done.
-        4. Otherwise → send Telegram alert, pre-fill email, wait ≤5 min
-           for the user to complete manual Google / magic-link login.
-        5. Save cookies on success.
+        If cookies are expired/missing, opens visible browser and sends
+        Telegram alert for manual Google/magic-link login.
         """
-        self.logger.info("═══ Indeed Login ═══")
+        logger.info("═══ Indeed Login ═══")
         try:
-            # 1. Launch
-            self.page = await self.browser_engine.launch("indeed", headless=False)
-            if not self.page:
-                self.logger.error("Browser launch failed")
-                return False
+            page = self._get_page()
 
-            # 2. Load cookies + navigate
-            await self.browser_engine.load_cookies("indeed")
-            await self.page.goto(_BASE_URL, wait_until="domcontentloaded", timeout=30_000)
-            await self._rand(2, 4)
-            await self._dismiss_popups(self.page)
+            # Load cookies + navigate
+            self.browser.load_cookies("indeed")
+            self.browser.navigate(page, _BASE_URL)
+            self.browser.random_delay(2, 4)
+            self._dismiss_popups(page)
 
-            # 3. Already logged in?
-            if await self._is_logged_in(self.page):
-                self.logger.info("✅ Indeed: logged in via saved cookies")
-                await self.browser_engine.save_cookies("indeed")
+            # Already logged in?
+            if self._is_logged_in(page):
+                logger.info("✅ Indeed: logged in via saved cookies")
+                self.browser.save_cookies("indeed")
                 self._update_session(logged_in=True)
                 return True
 
-            # 4. Manual login flow
-            self.logger.info("Not logged in — requesting manual auth")
+            # Manual login flow
+            logger.info("Not logged in — requesting manual auth")
             self._telegram_login_alert()
-            await self.page.goto(
-                f"{_BASE_URL}/account/login",
-                wait_until="domcontentloaded",
-                timeout=30_000,
-            )
-            await self._rand(2, 3)
+            self.browser.navigate(page, f"{_BASE_URL}/account/login")
+            self.browser.random_delay(2, 3)
 
             # Pre-fill email
             email = USER_PROFILE.get("email", "")
             if email:
-                email_el = await self._el(self.page, "email_input", timeout=4000)
+                email_el = _find(page, "email_input", timeout=4000)
                 if email_el:
-                    css = await self._css_for(email_el)
-                    await self.browser_engine.type_human(self.page, css, email)
+                    css = _css_for(email_el)
+                    self.browser.type_human(page, css, email)
 
-            # 5. Wait
-            ok = await self._wait_for_login(timeout_s=300)
+            # Wait for manual login
+            ok = self._wait_for_login(page, timeout_s=300)
             if ok:
-                self.logger.info("✅ Indeed: manual login succeeded")
-                await self.browser_engine.save_cookies("indeed")
+                logger.info("✅ Indeed: manual login succeeded")
+                self.browser.save_cookies("indeed")
                 self._update_session(logged_in=True)
-                self._tg("indeed", "✅ Indeed login successful!")
+                self._tg("✅ Indeed login successful!")
                 return True
 
-            self.logger.error("❌ Indeed login timed out")
+            logger.error("❌ Indeed login timed out")
             self._update_session(logged_in=False, error="Manual login timed out",
                                  cooldown_h=1)
             return False
 
         except Exception as exc:
-            self.logger.error("Login exception: %s", exc)
-            self.db.save_error("indeed.login", type(exc).__name__,
-                               str(exc), tb_module.format_exc())
+            logger.error("Login exception: %s", exc)
+            self._save_error("login", exc)
             self._update_session(logged_in=False, error=str(exc))
             return False
 
-    # ── login sub-routines ─────────────────────────────────────────────
-
-    async def _is_logged_in(self, page) -> bool:
+    def _is_logged_in(self, page) -> bool:
         """Heuristic check for logged-in state."""
-        pos = [
+        pos_sels = [
             "#AccountMenu",
             'button[data-gnav-element-name="AccountMenu"]',
             '[data-testid="account-menu"]',
@@ -627,45 +550,44 @@ class IndeedPlatform(PlatformBase):
             'a[href*="/myjobs"]',
             "#profileMenuButton",
         ]
-        for sel in pos:
+        for sel in pos_sels:
             try:
-                if await page.wait_for_selector(sel, timeout=2000):
+                if page.query_selector(sel):
                     return True
             except Exception:
                 continue
 
-        # Negative: sign-in link visible → NOT logged in
-        sign = await self._el(page, "sign_in_prompt", timeout=1500)
+        # Negative: sign-in link visible = NOT logged in
+        sign = _find(page, "sign_in_prompt", timeout=1500)
         if sign:
             return False
 
-        url = page.url
+        url = self.browser.get_page_url(page)
         if "/account/login" in url or "/registration" in url:
             return False
-        return False  # conservative default
+        return False
 
-    async def _wait_for_login(self, timeout_s: int = 300) -> bool:
-        """Poll every 5 s until login is detected or timeout."""
+    def _wait_for_login(self, page, timeout_s: int = 300) -> bool:
+        """Poll every 5s until login detected or timeout."""
         t0 = time.monotonic()
         while (time.monotonic() - t0) < timeout_s:
             try:
-                if await self._is_logged_in(self.page):
+                if self._is_logged_in(page):
                     return True
-                url = self.page.url
+                url = self.browser.get_page_url(page)
                 if any(p in url for p in ["/jobs", "/myjobs", "/?from=", "/myaccount"]):
-                    await self._rand(2, 3)
-                    if await self._is_logged_in(self.page):
+                    self.browser.random_delay(2, 3)
+                    if self._is_logged_in(page):
                         return True
-                    await self.page.goto(_BASE_URL, wait_until="domcontentloaded",
-                                         timeout=15_000)
-                    await self._rand(2, 3)
-                    return await self._is_logged_in(self.page)
+                    self.browser.navigate(page, _BASE_URL)
+                    self.browser.random_delay(2, 3)
+                    return self._is_logged_in(page)
             except Exception:
                 pass
-            await asyncio.sleep(5)
+            time.sleep(5)
         return False
 
-    def _telegram_login_alert(self):
+    def _telegram_login_alert(self) -> None:
         if not self.notifier:
             return
         try:
@@ -679,74 +601,73 @@ class IndeedPlatform(PlatformBase):
         except Exception:
             pass
 
-    # ── session DB helpers ─────────────────────────────────────────────
-
     def _update_session(self, *, logged_in: bool, error: str = None,
-                        cooldown_h: float = 0):
+                        cooldown_h: float = 0) -> None:
         updates: Dict[str, Any] = {
             "logged_in": int(logged_in),
             "last_login": datetime.now().isoformat() if logged_in else None,
-            "status": "active" if logged_in else ("cooldown" if cooldown_h else "active"),
+            "status": "active" if logged_in else (
+                "cooldown" if cooldown_h else "active"),
             "last_error": error,
         }
         if cooldown_h:
             updates["cooldown_until"] = (
                 datetime.now() + timedelta(hours=cooldown_h)
             ).isoformat()
-        self.db.update_platform_session("indeed", updates)
+        try:
+            self.db.update_platform_session("indeed", updates)
+        except Exception as e:
+            logger.debug("Session update failed: %s", e)
 
-    def _tg(self, platform: str, msg: str):
+    def _tg(self, msg: str) -> None:
         if self.notifier:
             try:
-                self.notifier.send_platform_issue(platform, msg)
+                self.notifier.send_platform_issue("indeed", msg)
             except Exception:
                 pass
 
+    def _save_error(self, method: str, error: Exception) -> None:
+        try:
+            self.db.save_error(
+                module=f"platforms.indeed.{method}",
+                error_type=type(error).__name__,
+                message=str(error),
+                traceback=tb_module.format_exc(),
+            )
+        except Exception:
+            pass
+
     # ═══════════════════════════════════════════════════════════════════
-    #  SEARCH JOBS
+    # SEARCH JOBS
     # ═══════════════════════════════════════════════════════════════════
 
-    async def search_jobs(
-        self,
-        queries: List[str] | None = None,
-        filters: Dict | None = None,
-    ) -> List[Dict]:
+    def search_jobs(self, queries: Optional[List[str]] = None,
+                    filters: Optional[Dict] = None) -> List[Dict]:
         """
-        Search Indeed across *queries × locations* with pagination.
+        Search Indeed across queries × locations with pagination.
 
-        Parameters
-        ----------
-        queries : list[str] | None
-            Search strings.  Falls back to ``config.PLATFORM_CONFIG["indeed"]["search_queries"]``.
-        filters : dict | None
-            Optional keys: ``locations`` (list[str]), ``fromage`` (int, days),
-            ``job_type`` (str), ``experience`` (str), ``sort`` (str).
-
-        Returns
-        -------
-        list[dict]
-            Unique jobs — each dict has at minimum:
-            ``platform_job_id, url, title, company, location, salary_text,
-            experience_text, description, posted_date, skills, work_mode,
-            job_type, discovered_at``.
+        Returns list of unique job dicts.
         """
-        self.logger.info("═══ Indeed Search ═══")
-        if not self.page:
-            self.logger.error("Browser not ready — call login() first")
-            return []
+        logger.info("═══ Indeed Search ═══")
+        page = self._get_page()
+
+        if not self._is_logged_in(page):
+            logger.warning("Not logged in, attempting login first")
+            if not self.login():
+                logger.error("Cannot search: login failed")
+                return []
 
         queries = queries or self.search_queries
         filters = filters or {}
         locations: List[str] = filters.get(
             "locations",
-            USER_PROFILE.get(
-                "target_locations",
-                ["Bangalore", "Hyderabad", "Pune", "Remote", "Delhi NCR", "Mumbai"],
-            ),
+            USER_PROFILE.get("target_locations", [
+                "Bangalore", "Hyderabad", "Pune",
+                "Remote", "Delhi NCR", "Mumbai",
+            ]),
         )
         fromage: int = filters.get("fromage", 3)
         job_type: str = filters.get("job_type", "fulltime")
-        experience: str = filters.get("experience", "")
         sort_by: str = filters.get("sort", "date")
 
         all_jobs: List[Dict] = []
@@ -754,21 +675,18 @@ class IndeedPlatform(PlatformBase):
         for q in queries:
             for loc in locations:
                 try:
-                    self.logger.info("→ '%s' in '%s'", q, loc)
-                    batch = await self._run_query(
-                        q, loc, fromage, job_type, experience, sort_by,
-                    )
-                    self.logger.info("  found %d jobs", len(batch))
+                    logger.info("→ '%s' in '%s'", q, loc)
+                    batch = self._run_query(page, q, loc, fromage,
+                                            job_type, sort_by)
+                    logger.info("  found %d jobs", len(batch))
                     all_jobs.extend(batch)
-                    lo, hi = self._stealth_range()
-                    await self._rand(lo, hi)
+                    self.browser.random_delay(
+                        *STEALTH_CONFIG.get("random_delay_range", (3, 12)))
                 except Exception as exc:
-                    self.logger.error("Search error '%s' / '%s': %s", q, loc, exc)
-                    self.db.save_error("indeed.search", type(exc).__name__,
-                                       str(exc), tb_module.format_exc())
+                    logger.error("Search error '%s'/'%s': %s", q, loc, exc)
+                    self._save_error("search_jobs", exc)
 
-        # Deduplicate by platform_job_id within this batch
-        # Deduplicate by platform_job_id within this batch
+        # Deduplicate
         seen: set = set()
         unique: List[Dict] = []
         for j in all_jobs:
@@ -777,207 +695,187 @@ class IndeedPlatform(PlatformBase):
                 seen.add(jid)
                 unique.append(j)
 
-        self.logger.info("═══ Indeed Search Complete: %d unique jobs ═══", len(unique))
+        logger.info("═══ Indeed Search Complete: %d unique jobs ═══",
+                     len(unique))
         return unique
 
-    # ── single query runner ────────────────────────────────────────────
-
-    async def _run_query(
-        self,
-        query: str,
-        location: str,
-        fromage: int,
-        job_type: str,
-        experience: str,
-        sort_by: str,
-    ) -> List[Dict]:
+    def _run_query(self, page, query: str, location: str,
+                   fromage: int, job_type: str, sort_by: str) -> List[Dict]:
         """Execute a single (query, location) search with pagination."""
         jobs: List[Dict] = []
 
         for page_num in range(self.max_pages):
             params: Dict[str, Any] = {
-                "q": query,
-                "l": location,
-                "fromage": fromage,
-                "sort": sort_by,
+                "q": query, "l": location,
+                "fromage": fromage, "sort": sort_by,
             }
             if job_type:
                 params["jt"] = job_type
-            if experience:
-                params["explvl"] = experience
             if page_num > 0:
                 params["start"] = page_num * 10
 
             url = f"{_SEARCH_URL}?{urlencode(params)}"
-            self.logger.debug("  page %d → %s", page_num + 1, url)
+            logger.debug("  page %d → %s", page_num + 1, url)
 
             try:
-                await self.page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-                await self._rand(2, 4)
-                await self._dismiss_popups(self.page)
-                await self._human_scroll(self.page, rounds=random.randint(2, 4))
+                if not self.browser.navigate(page, url):
+                    break
+                self.browser.random_delay(2, 4)
+                self._dismiss_popups(page)
+                self._human_scroll(page, rounds=random.randint(2, 4))
 
-                # Captcha check
-                cap = await self.detect_captcha(self.page)
+                # CAPTCHA check
+                cap = self.detect_captcha(page)
                 if cap:
-                    self.logger.warning("CAPTCHA detected on search page")
-                    solved = await self.handle_captcha(self.page, self.notifier)
-                    if not solved:
-                        self.logger.error("CAPTCHA unsolved — aborting query")
+                    logger.warning("CAPTCHA on search page")
+                    if not self.handle_captcha(page, self.notifier):
                         break
 
                 # No results?
-                no_results_sels = [
-                    '.jobsearch-NoResult-messageContainer',
-                    'p:has-text("did not match any jobs")',
-                    'p:has-text("No matching jobs found")',
-                    'div:has-text("0 results")',
-                ]
                 no_res = False
-                for sel in no_results_sels:
+                for sel in ['.jobsearch-NoResult-messageContainer',
+                            'p:has-text("did not match any jobs")',
+                            'p:has-text("No matching jobs found")']:
                     try:
-                        el = await self.page.wait_for_selector(sel, timeout=1500)
-                        if el:
+                        if page.query_selector(sel):
                             no_res = True
                             break
                     except Exception:
                         continue
                 if no_res:
-                    self.logger.info("  no results for '%s' in '%s'", query, location)
+                    logger.info("  no results for '%s' in '%s'",
+                                query, location)
                     break
 
-                batch = await self._parse_job_cards(self.page, query, location)
+                batch = self._parse_job_cards(page, query, location)
                 if not batch:
-                    self.logger.debug("  0 cards parsed — stopping pagination")
                     break
                 jobs.extend(batch)
 
-                # Check next page exists
+                # Next page?
                 if page_num < self.max_pages - 1:
-                    nxt = await self._el(self.page, "next_page", timeout=2000)
+                    nxt = _find(page, "next_page", timeout=2000)
                     if not nxt:
                         break
-                    await self._rand(1.5, 3.0)
+                    self.browser.random_delay(1.5, 3.0)
 
             except Exception as exc:
-                self.logger.error("  page %d error: %s", page_num + 1, exc)
+                logger.error("  page %d error: %s", page_num + 1, exc)
                 break
 
         return jobs
 
-    # ── card parsing ───────────────────────────────────────────────────
-
-    async def _parse_job_cards(self, page, query: str, location: str) -> List[Dict]:
-        """Parse all job cards on the current search-results page."""
-        cards = await self._els(page, "job_cards", timeout=8000)
+    def _parse_job_cards(self, page, query: str,
+                         location: str) -> List[Dict]:
+        """Parse all job cards on current search results page."""
+        cards = _find_all(page, "job_cards", timeout=8000)
         if not cards:
-            self.logger.debug("  no job cards found")
             return []
 
         results: List[Dict] = []
         for card in cards:
             try:
-                data = await self._extract_card_data(card, query, location)
+                data = self._extract_card(card, query, location)
                 if data and data.get("platform_job_id"):
                     results.append(data)
             except Exception as exc:
-                self.logger.debug("  card parse error: %s", exc)
+                logger.debug("  card parse error: %s", exc)
         return results
 
-    async def _extract_card_data(self, card, query: str, location: str) -> Optional[Dict]:
-        """Extract structured data from a single job card element."""
+    def _extract_card(self, card, query: str,
+                      location: str) -> Optional[Dict]:
+        """Extract structured data from a single job card."""
         now_iso = datetime.now().isoformat()
 
-        # ── Job ID ─────────────────────────────────────────────────────
+        # Job ID
         jid = ""
-        for attr in ("data-jk", "id", "data-id"):
-            jid = await self._attr(card, attr)
+        for a in ("data-jk", "id", "data-id"):
+            jid = _attr(card, a)
             if jid:
                 break
         if not jid:
-            # Try extracting from child <a> href
-            link_el = await card.query_selector("a[data-jk]")
+            link_el = card.query_selector("a[data-jk]")
             if link_el:
-                jid = await self._attr(link_el, "data-jk")
+                jid = _attr(link_el, "data-jk")
             if not jid:
-                link_el = await card.query_selector("a[href*='jk=']")
+                link_el = card.query_selector("a[href*='jk=']")
                 if link_el:
-                    href = await self._attr(link_el, "href")
+                    href = _attr(link_el, "href")
                     m = re.search(r"jk=([a-f0-9]+)", href)
                     if m:
                         jid = m.group(1)
         if not jid:
             return None
 
-        # ── Title ──────────────────────────────────────────────────────
+        # Title
         title = ""
         for sel in _SEL["job_title"]:
-            el = await card.query_selector(sel)
+            el = card.query_selector(sel)
             if el:
-                title = await self._txt(el)
+                title = _txt(el)
                 if title:
                     break
         if not title:
             return None
 
-        # ── URL ────────────────────────────────────────────────────────
+        # URL
         url = f"{_BASE_URL}/viewjob?jk={jid}"
         for sel in _SEL["job_title"]:
-            el = await card.query_selector(sel)
+            el = card.query_selector(sel)
             if el:
-                href = await self._attr(el, "href")
+                href = _attr(el, "href")
                 if href:
                     if href.startswith("/"):
                         href = f"{_BASE_URL}{href}"
                     url = href
                     break
 
-        # ── Company ────────────────────────────────────────────────────
+        # Company
         company = ""
         for sel in _SEL["company_name"]:
-            el = await card.query_selector(sel)
+            el = card.query_selector(sel)
             if el:
-                company = await self._txt(el)
+                company = _txt(el)
                 if company:
                     break
 
-        # ── Location ───────────────────────────────────────────────────
+        # Location
         loc = ""
         for sel in _SEL["location"]:
-            el = await card.query_selector(sel)
+            el = card.query_selector(sel)
             if el:
-                loc = await self._txt(el)
+                loc = _txt(el)
                 if loc:
                     break
 
-        # ── Salary ─────────────────────────────────────────────────────
+        # Salary
         salary = ""
         for sel in _SEL["salary"]:
-            el = await card.query_selector(sel)
+            el = card.query_selector(sel)
             if el:
-                salary = await self._txt(el)
+                salary = _txt(el)
                 if salary:
                     break
 
-        # ── Posted date ────────────────────────────────────────────────
+        # Posted date
         posted = ""
         for sel in _SEL["date_posted"]:
-            el = await card.query_selector(sel)
+            el = card.query_selector(sel)
             if el:
-                posted = await self._txt(el)
+                posted = _txt(el)
                 if posted:
                     break
 
-        # ── Snippet ────────────────────────────────────────────────────
+        # Snippet
         snippet = ""
         for sel in _SEL["job_snippet"]:
-            el = await card.query_selector(sel)
+            el = card.query_selector(sel)
             if el:
-                snippet = await self._txt(el)
+                snippet = _txt(el)
                 if snippet:
                     break
 
-        # ── Work mode detection ────────────────────────────────────────
+        # Work mode
         combined = f"{title} {loc} {snippet}".lower()
         if "remote" in combined:
             work_mode = "remote"
@@ -986,21 +884,17 @@ class IndeedPlatform(PlatformBase):
         else:
             work_mode = "onsite"
 
-        # ── Experience hint ────────────────────────────────────────────
+        # Experience
         exp_text = ""
-        exp_match = re.search(r"(\d+)\s*[-–to]+\s*(\d+)\s*(?:years?|yrs?)", combined)
+        exp_match = re.search(
+            r"(\d+)\s*[-–to]+\s*(\d+)\s*(?:years?|yrs?)", combined)
         if not exp_match:
             exp_match = re.search(r"(\d+)\+?\s*(?:years?|yrs?)", combined)
         if exp_match:
             exp_text = exp_match.group(0)
 
-        # ── Skills from snippet ────────────────────────────────────────
-        skills_found: List[str] = []
-        for pat in _SKILL_PATTERNS:
-            if re.search(pat, f"{title} {snippet}", re.IGNORECASE):
-                match_str = re.search(pat, f"{title} {snippet}", re.IGNORECASE)
-                if match_str:
-                    skills_found.append(match_str.group(0))
+        # Skills
+        skills_found = _extract_skills(f"{title} {snippet}")
 
         return {
             "platform": "indeed",
@@ -1013,97 +907,82 @@ class IndeedPlatform(PlatformBase):
             "experience_text": exp_text,
             "description": snippet,
             "posted_date": posted,
-            "skills": list(set(skills_found)),
+            "skills": skills_found,
             "work_mode": work_mode,
             "job_type": "full-time",
             "discovered_at": now_iso,
-            "search_query": query,
-            "search_location": location,
         }
 
     # ═══════════════════════════════════════════════════════════════════
-    #  GET JOB DETAILS
+    # GET JOB DETAILS
     # ═══════════════════════════════════════════════════════════════════
 
-    async def get_job_details(self, job_url: str) -> Dict:
-        """
-        Navigate to a job page and extract the full JD, salary, skills, etc.
-
-        Returns
-        -------
-        dict
-            Keys: ``title, company, location, salary_text, experience_text,
-            description, skills, work_mode, job_type, has_indeed_apply,
-            posted_date``.
-        """
-        self.logger.info("Fetching details: %s", job_url)
-        if not self.page:
-            self.logger.error("Browser not ready")
-            return {}
+    def get_job_details(self, job_url: str) -> Dict:
+        """Navigate to job page and extract full details."""
+        logger.info("Fetching details: %s", job_url)
+        page = self._get_page()
 
         try:
-            await self.page.goto(job_url, wait_until="domcontentloaded", timeout=30_000)
-            await self._rand(2, 4)
-            await self._dismiss_popups(self.page)
-            await self._human_scroll(self.page, rounds=random.randint(2, 3))
+            if not self.browser.navigate(page, job_url):
+                return {}
+            self.browser.random_delay(2, 4)
+            self._dismiss_popups(page)
+            self._human_scroll(page, rounds=random.randint(2, 3))
 
             result: Dict[str, Any] = {"url": job_url}
 
-            # ── Title ──────────────────────────────────────────────────
-            el = await self._el(self.page, "detail_title", timeout=5000)
-            result["title"] = await self._txt(el)
+            el = _find(page, "detail_title", timeout=5000)
+            result["title"] = _txt(el)
 
-            # ── Company ────────────────────────────────────────────────
-            el = await self._el(self.page, "detail_company", timeout=3000)
-            result["company"] = await self._txt(el)
+            el = _find(page, "detail_company", timeout=3000)
+            result["company"] = _txt(el)
 
-            # ── Location ───────────────────────────────────────────────
-            el = await self._el(self.page, "detail_location", timeout=3000)
-            result["location"] = await self._txt(el)
+            el = _find(page, "detail_location", timeout=3000)
+            result["location"] = _txt(el)
 
-            # ── Salary ─────────────────────────────────────────────────
-            el = await self._el(self.page, "detail_salary", timeout=3000)
-            result["salary_text"] = await self._txt(el)
+            el = _find(page, "detail_salary", timeout=3000)
+            result["salary_text"] = _txt(el)
 
-            # ── Posted date ────────────────────────────────────────────
+            # Posted date
             posted = ""
             for sel in _SEL["detail_date"]:
                 try:
-                    el2 = await self.page.wait_for_selector(sel, timeout=2000)
+                    el2 = page.query_selector(sel)
                     if el2:
-                        posted = await self._txt(el2)
+                        posted = _txt(el2)
                         if posted:
                             break
                 except Exception:
                     continue
             result["posted_date"] = posted
 
-            # ── Full JD ────────────────────────────────────────────────
-            desc_el = await self._el(self.page, "job_description", timeout=6000)
-            description = await self._txt(desc_el)
+            # Full JD
+            desc_el = _find(page, "job_description", timeout=6000)
+            description = _txt(desc_el)
             result["description"] = description
 
-            # ── Skills from JD ─────────────────────────────────────────
-            skills: List[str] = []
-            for pat in _SKILL_PATTERNS:
-                m = re.search(pat, description, re.IGNORECASE)
-                if m:
-                    skills.append(m.group(0))
-            result["skills"] = list(set(skills))
+            # Skills
+            result["skills"] = _extract_skills(description)
 
-            # ── Experience from JD ─────────────────────────────────────
+            # Experience
             exp_text = ""
             exp_m = re.search(
-                r"(\d+)\s*[-–to]+\s*(\d+)\s*(?:years?|yrs?)", description, re.IGNORECASE
-            )
+                r"(\d+)\s*[-–to]+\s*(\d+)\s*(?:years?|yrs?)",
+                description, re.IGNORECASE)
             if not exp_m:
-                exp_m = re.search(r"(\d+)\+?\s*(?:years?|yrs?)", description, re.IGNORECASE)
+                exp_m = re.search(
+                    r"(\d+)\+?\s*(?:years?|yrs?)",
+                    description, re.IGNORECASE)
             if exp_m:
                 exp_text = exp_m.group(0)
             result["experience_text"] = exp_text
 
-            # ── Work mode ──────────────────────────────────────────────
-            combined_lower = f"{result.get('title','')} {result.get('location','')} {description}".lower()
+            # Work mode
+            combined_lower = (
+                f"{result.get('title','')} "
+                f"{result.get('location','')} "
+                f"{description}"
+            ).lower()
             if "remote" in combined_lower:
                 result["work_mode"] = "remote"
             elif "hybrid" in combined_lower:
@@ -1113,248 +992,230 @@ class IndeedPlatform(PlatformBase):
 
             result["job_type"] = "full-time"
 
-            # ── Indeed Apply available? ────────────────────────────────
-            apply_btn = await self._el(self.page, "apply_button", timeout=3000)
-            external_btn = await self._el(self.page, "external_apply", timeout=1500)
-            result["has_indeed_apply"] = apply_btn is not None and external_btn is None
+            # Indeed Apply available?
+            apply_btn = _find(page, "apply_button", timeout=3000)
+            external_btn = _find(page, "external_apply", timeout=1500)
+            result["has_indeed_apply"] = (
+                apply_btn is not None and external_btn is None)
 
-            self.logger.info("  ✅ '%s' @ '%s' — %d skills, apply=%s",
-                             result.get("title", "?"), result.get("company", "?"),
-                             len(result.get("skills", [])),
-                             result.get("has_indeed_apply"))
+            logger.info("  ✅ '%s' @ '%s' — %d skills, apply=%s",
+                         result.get("title", "?"),
+                         result.get("company", "?"),
+                         len(result.get("skills", [])),
+                         result.get("has_indeed_apply"))
             return result
 
         except Exception as exc:
-            self.logger.error("get_job_details error: %s", exc)
-            self.db.save_error("indeed.get_job_details", type(exc).__name__,
-                               str(exc), tb_module.format_exc())
+            logger.error("get_job_details error: %s", exc)
+            self._save_error("get_job_details", exc)
             return {}
 
     # ═══════════════════════════════════════════════════════════════════
-    #  PREPARE APPLICATION  (fill form — DO NOT SUBMIT)
+    # PREPARE APPLICATION (fill form — DO NOT SUBMIT)
     # ═══════════════════════════════════════════════════════════════════
 
-    async def prepare_application(
-        self,
-        job: Dict,
-        resume_path: str,
-        cover_letter: Optional[str] = None,
-    ) -> Dict:
+    def prepare_application(self, job: Dict, resume_path: str,
+                            cover_letter: Optional[str] = None) -> Dict:
         """
-        Navigate to the job, click Apply, fill the multi-step form, and
-        **pause before final submission**.
-
-        Returns
-        -------
-        dict
-            ``{success: bool, job_id, method, state, error?}``
-            ``state`` is stored internally so ``submit_application`` can
-            continue from the same point.
+        Navigate to job, click Apply, fill multi-step form, pause
+        before final submission.
         """
         jid = str(job.get("id", job.get("platform_job_id", "unknown")))
-        self.logger.info("═══ Prepare Application: %s @ %s ═══",
-                         job.get("title", "?"), job.get("company", "?"))
+        logger.info("═══ Prepare Application: %s @ %s ═══",
+                     job.get("title", "?"), job.get("company", "?"))
 
-        if not self.page:
-            return {"success": False, "job_id": jid, "error": "Browser not ready"}
+        result = {
+            "status": "failed",
+            "job": job,
+            "platform": self.PLATFORM_NAME,
+            "apply_type": "indeed_apply",
+            "resume_path": resume_path,
+            "error": None,
+            "timestamp": datetime.now().isoformat(),
+        }
+
+        page = self._get_page()
 
         if not self._can_apply_now():
-            return {"success": False, "job_id": jid, "error": "Rate limit / daily cap"}
+            result["error"] = "Rate limit / daily cap"
+            return result
 
         if not os.path.isfile(resume_path):
-            return {"success": False, "job_id": jid, "error": f"Resume not found: {resume_path}"}
+            result["error"] = f"Resume not found: {resume_path}"
+            return result
 
         url = job.get("url", "")
         if not url:
-            return {"success": False, "job_id": jid, "error": "No job URL"}
+            result["error"] = "No job URL"
+            return result
 
         try:
-            # Navigate to job page
-            await self.page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-            await self._rand(2, 4)
-            await self._dismiss_popups(self.page)
-            await self._human_scroll(self.page, rounds=random.randint(1, 3))
+            if not self.browser.navigate(page, url):
+                result["error"] = "Cannot load job page"
+                return result
+            self.browser.random_delay(2, 4)
+            self._dismiss_popups(page)
+            self._human_scroll(page, rounds=random.randint(1, 3))
 
             # CAPTCHA check
-            cap = await self.detect_captcha(self.page)
+            cap = self.detect_captcha(page)
             if cap:
-                solved = await self.handle_captcha(self.page, self.notifier)
-                if not solved:
-                    return {"success": False, "job_id": jid, "error": "CAPTCHA unsolved"}
+                if not self.handle_captcha(page, self.notifier):
+                    result["error"] = "CAPTCHA unsolved"
+                    return result
 
             # Click Apply
-            apply_btn = await self._el(self.page, "apply_button", timeout=5000)
+            apply_btn = _find(page, "apply_button", timeout=5000)
             if not apply_btn:
-                # Maybe external apply
-                ext = await self._el(self.page, "external_apply", timeout=2000)
+                ext = _find(page, "external_apply", timeout=2000)
                 if ext:
-                    return {"success": False, "job_id": jid,
-                            "error": "External apply — not Indeed Apply",
-                            "method": "external"}
-                return {"success": False, "job_id": jid,
-                        "error": "Apply button not found"}
+                    result["status"] = "external"
+                    result["apply_type"] = "external"
+                    result["error"] = "External apply — not Indeed Apply"
+                    return result
+                result["error"] = "Apply button not found"
+                return result
 
-            css = await self._css_for(apply_btn)
-            await self.browser_engine.click_human(self.page, css)
-            await self._rand(3, 5)
+            css = _css_for(apply_btn)
+            self.browser.click_human(page, css)
+            self.browser.random_delay(3, 5)
 
-            # Indeed Apply opens in modal or new page — handle both
-            apply_page = self.page
-            pages = self.page.context.pages
-            if len(pages) > 1:
-                apply_page = pages[-1]
-                await apply_page.wait_for_load_state("domcontentloaded", timeout=15_000)
-                await self._rand(2, 3)
+            # Indeed Apply may open in new tab
+            apply_page = page
+            try:
+                pages = page.context.pages
+                if len(pages) > 1:
+                    apply_page = pages[-1]
+                    apply_page.wait_for_load_state(
+                        "domcontentloaded", timeout=15000)
+                    self.browser.random_delay(2, 3)
+            except Exception:
+                pass
 
             # Walk through multi-step form
-            form_result = await self._walk_apply_form(
-                apply_page, resume_path, cover_letter, job
-            )
+            form_result = self._walk_apply_form(
+                apply_page, resume_path, cover_letter, job)
 
             if form_result.get("ready_to_submit"):
-                # Store state for submit_application
                 self._prepared[jid] = {
                     "apply_page": apply_page,
                     "job": job,
                     "resume_path": resume_path,
                     "timestamp": datetime.now().isoformat(),
                 }
-                self.logger.info("  ✅ Application PREPARED — awaiting approval")
-                return {
-                    "success": True,
-                    "job_id": jid,
-                    "method": "indeed_apply",
-                    "state": "prepared",
-                    "steps_completed": form_result.get("steps", 0),
-                }
+                result["status"] = "ready"
+                result["screenshot"] = self.browser.take_screenshot(
+                    apply_page, f"indeed_ready_{jid}")
+                logger.info("  ✅ Application PREPARED — awaiting approval")
+                return result
             else:
-                err = form_result.get("error", "Form walk failed")
-                self.logger.warning("  ❌ Prepare failed: %s", err)
-                await self._screenshot(apply_page, f"indeed_prepare_fail_{jid}")
-                await self._close_extra_tabs()
-                return {"success": False, "job_id": jid, "error": err}
+                result["error"] = form_result.get("error", "Form walk failed")
+                self.browser.take_screenshot(
+                    apply_page, f"indeed_prepare_fail_{jid}")
+                self._close_extra_tabs(page)
+                return result
 
         except Exception as exc:
-            self.logger.error("prepare_application error: %s", exc)
-            self.db.save_error("indeed.prepare_application", type(exc).__name__,
-                               str(exc), tb_module.format_exc())
-            await self._close_extra_tabs()
-            return {"success": False, "job_id": jid, "error": str(exc)}
+            logger.error("prepare_application error: %s", exc)
+            self._save_error("prepare_application", exc)
+            self._close_extra_tabs(page)
+            result["error"] = str(exc)
+            return result
 
-    # ── multi-step form walker ─────────────────────────────────────────
-
-    async def _walk_apply_form(
-        self,
-        page,
-        resume_path: str,
-        cover_letter: Optional[str],
-        job: Dict,
-    ) -> Dict:
-        """
-        Walk through Indeed's multi-step apply form.
-
-        Steps typically: Contact → Resume → Questions → Review → Submit.
-        This method stops at the **Submit** / **Review** step and returns
-        ``{ready_to_submit: True}`` so the caller can wait for Telegram
-        approval.
-        """
-        MAX_STEPS = 12  # safety: never loop more than this
+    def _walk_apply_form(self, page, resume_path: str,
+                         cover_letter: Optional[str],
+                         job: Dict) -> Dict:
+        """Walk through Indeed's multi-step apply form."""
+        MAX_STEPS = 12
         steps = 0
 
         for step in range(MAX_STEPS):
-            await self._rand(1.5, 3.0)
-            await self._dismiss_popups(page)
+            self.browser.random_delay(1.5, 3.0)
+            self._dismiss_popups(page)
 
-            page_html = ""
-            try:
-                page_html = await page.content()
-            except Exception:
-                pass
-            page_lower = page_html.lower()
+            page_html = self.browser.get_page_html(page).lower()
 
-            # ── Check for submit / review button = we're done ──────────
-            submit_btn = await self._el(page, "submit_button", timeout=2000)
+            # Submit button = done
+            submit_btn = _find(page, "submit_button", timeout=2000)
             if submit_btn:
-                self.logger.info("  step %d: SUBMIT button found — ready", step + 1)
+                logger.info("  step %d: SUBMIT button found — ready",
+                            step + 1)
                 return {"ready_to_submit": True, "steps": step + 1}
 
-            review_btn = await self._el(page, "review_button", timeout=1500)
+            # Review button
+            review_btn = _find(page, "review_button", timeout=1500)
             if review_btn:
-                self.logger.info("  step %d: REVIEW button — clicking", step + 1)
-                css = await self._css_for(review_btn)
-                await self.browser_engine.click_human(page, css)
-                await self._rand(2, 4)
-                # After review, submit should appear
-                submit_btn2 = await self._el(page, "submit_button", timeout=5000)
+                logger.info("  step %d: REVIEW button — clicking",
+                            step + 1)
+                css = _css_for(review_btn)
+                self.browser.click_human(page, css)
+                self.browser.random_delay(2, 4)
+                submit_btn2 = _find(page, "submit_button", timeout=5000)
                 if submit_btn2:
                     return {"ready_to_submit": True, "steps": step + 2}
                 continue
 
-            # ── Check for confirmation / success ───────────────────────
-            if self._is_success_page(page_lower, page.url):
-                self.logger.info("  step %d: already submitted? success page detected", step + 1)
-                return {"ready_to_submit": False, "error": "Already submitted (success page)"}
+            # Success page?
+            if self._is_success_page(page_html, self.browser.get_page_url(page)):
+                return {"ready_to_submit": False,
+                        "error": "Already submitted (success page)"}
 
-            # ── CAPTCHA ────────────────────────────────────────────────
-            cap = await self.detect_captcha(page)
+            # CAPTCHA
+            cap = self.detect_captcha(page)
             if cap:
-                solved = await self.handle_captcha(page, self.notifier)
-                if not solved:
-                    return {"ready_to_submit": False, "error": "CAPTCHA unsolved"}
+                if not self.handle_captcha(page, self.notifier):
+                    return {"ready_to_submit": False,
+                            "error": "CAPTCHA unsolved"}
                 continue
 
-            # ── Resume upload step ─────────────────────────────────────
-            uploaded = await self._upload_resume(page, resume_path)
+            # Resume upload
+            uploaded = self._upload_resume(page, resume_path)
             if uploaded:
-                self.logger.info("  step %d: resume uploaded", step + 1)
+                logger.info("  step %d: resume uploaded", step + 1)
 
-            # ── Fill form fields ───────────────────────────────────────
-            fields_handled = await self._handle_form_fields(page, job, cover_letter)
+            # Fill fields
+            fields_handled = self._handle_form_fields(
+                page, job, cover_letter)
             if fields_handled:
-                self.logger.info("  step %d: %d fields handled", step + 1, fields_handled)
+                logger.info("  step %d: %d fields handled",
+                            step + 1, fields_handled)
                 steps = step + 1
 
-            # ── Click Continue / Next ──────────────────────────────────
-            cont_btn = await self._el(page, "continue_button", timeout=3000)
+            # Continue / Next
+            cont_btn = _find(page, "continue_button", timeout=3000)
             if cont_btn:
-                self.logger.info("  step %d: clicking Continue", step + 1)
-                css = await self._css_for(cont_btn)
-                await self.browser_engine.click_human(page, css)
-                await self._rand(2, 4)
-                await page.wait_for_load_state("domcontentloaded", timeout=10_000)
+                logger.info("  step %d: clicking Continue", step + 1)
+                css = _css_for(cont_btn)
+                self.browser.click_human(page, css)
+                self.browser.random_delay(2, 4)
                 continue
 
-            # ── No continue and no submit — stuck ──────────────────────
-            # Try any visible button that looks like progress
-            fallback_sels = [
-                'button:has-text("Apply")',
-                'button:has-text("Save")',
-                'button:has-text("Confirm")',
-                'button[type="submit"]',
-            ]
+            # Fallback buttons
             clicked = False
-            for sel in fallback_sels:
+            for sel in ['button:has-text("Apply")',
+                        'button:has-text("Save")',
+                        'button:has-text("Confirm")',
+                        'button[type="submit"]']:
                 try:
-                    el = await page.wait_for_selector(sel, timeout=1500, state="visible")
-                    if el:
-                        await self.browser_engine.click_human(page, sel)
-                        await self._rand(2, 4)
+                    if page.query_selector(sel):
+                        self.browser.click_human(page, sel)
+                        self.browser.random_delay(2, 4)
                         clicked = True
                         break
                 except Exception:
                     continue
 
             if not clicked:
-                self.logger.warning("  step %d: stuck — no button found", step + 1)
-                await self._screenshot(page, f"indeed_stuck_step{step}")
+                logger.warning("  step %d: stuck — no button found",
+                               step + 1)
                 return {"ready_to_submit": False, "steps": steps,
                         "error": f"Stuck at step {step + 1}"}
 
-        return {"ready_to_submit": False, "error": "Max steps exceeded", "steps": steps}
+        return {"ready_to_submit": False,
+                "error": "Max steps exceeded", "steps": steps}
 
     @staticmethod
     def _is_success_page(html_lower: str, url: str) -> bool:
-        """Return True if the page looks like a post-submit confirmation."""
         markers = [
             "application has been submitted",
             "your application was sent",
@@ -1370,60 +1231,52 @@ class IndeedPlatform(PlatformBase):
             return True
         return False
 
-    # ── resume upload ──────────────────────────────────────────────────
-
-    async def _upload_resume(self, page, resume_path: str) -> bool:
-        """Upload resume via <input type='file'> or file-chooser dialog."""
+    def _upload_resume(self, page, resume_path: str) -> bool:
+        """Upload resume via file input or file-chooser dialog."""
         abs_path = os.path.abspath(resume_path)
         if not os.path.isfile(abs_path):
-            self.logger.warning("Resume file not found: %s", abs_path)
             return False
 
-        # Strategy 1: direct <input type="file">
+        # Strategy 1: direct input[type=file]
         for sel in _SEL["resume_upload"]:
             try:
-                inp = await page.wait_for_selector(sel, timeout=2000)
+                inp = page.query_selector(sel)
                 if inp:
-                    await inp.set_input_files(abs_path)
-                    self.logger.info("    resume uploaded via input[type=file]")
-                    await self._rand(1.5, 3.0)
+                    inp.set_input_files(abs_path)
+                    logger.info("    resume uploaded via input[type=file]")
+                    self.browser.random_delay(1.5, 3.0)
                     return True
             except Exception:
                 continue
 
-        # Strategy 2: click upload button → file chooser dialog
+        # Strategy 2: click upload button → file chooser
         upload_btn_sels = [
             'button:has-text("Upload resume")',
             'button:has-text("Upload")',
             'label:has-text("Upload resume")',
-            'span:has-text("Upload resume")',
             '[data-testid="upload-resume"]',
         ]
         for sel in upload_btn_sels:
             try:
-                btn = await page.wait_for_selector(sel, timeout=1500, state="visible")
+                btn = page.query_selector(sel)
                 if btn:
-                    async with page.expect_file_chooser(timeout=5000) as fc_info:
-                        await btn.click()
-                    file_chooser = await fc_info.value
-                    await file_chooser.set_files(abs_path)
-                    self.logger.info("    resume uploaded via file chooser")
-                    await self._rand(1.5, 3.0)
+                    with page.expect_file_chooser(timeout=5000) as fc_info:
+                        btn.click()
+                    file_chooser = fc_info.value
+                    file_chooser.set_files(abs_path)
+                    logger.info("    resume uploaded via file chooser")
+                    self.browser.random_delay(1.5, 3.0)
                     return True
             except Exception:
                 continue
 
-        # Strategy 3: "use resume on file" — skip upload
-        use_existing_sels = [
-            'button:has-text("Use last uploaded")',
-            'div:has-text("Resume on Indeed")',
-            ':has-text("resume on file")',
-        ]
-        for sel in use_existing_sels:
+        # Strategy 3: resume on file
+        for sel in ['button:has-text("Use last uploaded")',
+                    'div:has-text("Resume on Indeed")',
+                    ':has-text("resume on file")']:
             try:
-                el = await page.wait_for_selector(sel, timeout=1500)
-                if el:
-                    self.logger.info("    Indeed resume on file — skipping upload")
+                if page.query_selector(sel):
+                    logger.info("    Indeed resume on file — skipping")
                     return True
             except Exception:
                 continue
@@ -1432,286 +1285,260 @@ class IndeedPlatform(PlatformBase):
 
     # ── form field handling ────────────────────────────────────────────
 
-    async def _handle_form_fields(
-        self, page, job: Dict, cover_letter: Optional[str] = None,
-    ) -> int:
-        """Detect and fill all form fields on the current step."""
+    def _handle_form_fields(self, page, job: Dict,
+                            cover_letter: Optional[str] = None) -> int:
+        """Detect and fill all form fields on current step."""
         handled = 0
 
-        # ── Standard text/email/tel/number inputs ──────────────────────
-        input_sels = [
-            'input[type="text"]:visible',
-            'input[type="email"]:visible',
-            'input[type="tel"]:visible',
-            'input[type="number"]:visible',
-            'input:not([type="file"]):not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):visible',
-        ]
-        for sel in input_sels:
+        # Text inputs
+        for sel in ['input[type="text"]:visible',
+                    'input[type="email"]:visible',
+                    'input[type="tel"]:visible',
+                    'input[type="number"]:visible']:
             try:
-                inputs = await page.query_selector_all(sel)
+                inputs = page.query_selector_all(sel)
                 for inp in inputs:
-                    ok = await self._handle_single_input(page, inp, job)
-                    if ok:
+                    if self._handle_single_input(page, inp, job):
                         handled += 1
             except Exception:
                 continue
 
-        # ── Textareas (cover letter, "why apply", etc.) ────────────────
+        # Textareas
         try:
-            textareas = await page.query_selector_all("textarea:visible")
+            textareas = page.query_selector_all("textarea:visible")
             for ta in textareas:
-                ok = await self._handle_textarea(page, ta, job, cover_letter)
-                if ok:
+                if self._handle_textarea(page, ta, job, cover_letter):
                     handled += 1
         except Exception:
             pass
 
-        # ── Selects (dropdowns) ────────────────────────────────────────
+        # Selects
         try:
-            selects = await page.query_selector_all("select:visible")
+            selects = page.query_selector_all("select:visible")
             for sel_el in selects:
-                ok = await self._handle_select(page, sel_el, job)
-                if ok:
+                if self._handle_select(page, sel_el, job):
                     handled += 1
         except Exception:
             pass
 
-        # ── Radio buttons ──────────────────────────────────────────────
+        # Radio groups
         try:
-            radio_groups = await page.query_selector_all(
-                'fieldset:visible, div[role="radiogroup"]:visible, div[role="group"]:visible'
-            )
-            for rg in radio_groups:
-                ok = await self._handle_radio_group(page, rg, job)
-                if ok:
+            groups = page.query_selector_all(
+                'fieldset:visible, div[role="radiogroup"]:visible')
+            for rg in groups:
+                if self._handle_radio_group(page, rg, job):
                     handled += 1
         except Exception:
             pass
 
-        # ── Checkboxes (consent / terms) ───────────────────────────────
+        # Checkboxes
         try:
-            checkboxes = await page.query_selector_all(
-                'input[type="checkbox"]:visible'
-            )
-            for cb in checkboxes:
-                ok = await self._handle_checkbox(page, cb)
-                if ok:
+            cbs = page.query_selector_all('input[type="checkbox"]:visible')
+            for cb in cbs:
+                if self._handle_checkbox(page, cb):
                     handled += 1
         except Exception:
             pass
 
         return handled
 
-    async def _handle_single_input(self, page, inp, job: Dict) -> bool:
-        """Fill a single <input> based on its label / name / type."""
+    def _handle_single_input(self, page, inp, job: Dict) -> bool:
         try:
-            # Skip if already filled
-            val = await inp.input_value()
-            if val and len(val.strip()) > 0:
+            val = inp.input_value() or ""
+            if val.strip():
                 return False
 
-            name = (await self._attr(inp, "name")).lower()
-            ph = (await self._attr(inp, "placeholder")).lower()
-            label_text = await self._get_label_for(page, inp)
+            name = (_attr(inp, "name")).lower()
+            ph = (_attr(inp, "placeholder")).lower()
+            label_text = self._get_label_for(page, inp)
             label_lower = label_text.lower()
-            inp_type = (await self._attr(inp, "type")).lower() or "text"
-            aria = (await self._attr(inp, "aria-label")).lower()
+            inp_type = (_attr(inp, "type")).lower() or "text"
+            aria = (_attr(inp, "aria-label")).lower()
             combined = f"{name} {ph} {label_lower} {aria}"
 
             answer = self._resolve_field_answer(combined, inp_type, job)
             if not answer:
                 return False
 
-            css = await self._css_for(inp)
-            await self.browser_engine.type_human(page, css, answer)
-            await self._rand(0.5, 1.2)
+            css = _css_for(inp)
+            self.browser.type_human(page, css, answer)
+            self.browser.random_delay(0.5, 1.2)
             return True
         except Exception:
             return False
 
-    async def _handle_textarea(self, page, ta, job: Dict,
-                                cover_letter: Optional[str]) -> bool:
-        """Fill a <textarea>."""
+    def _handle_textarea(self, page, ta, job: Dict,
+                         cover_letter: Optional[str]) -> bool:
         try:
-            val = await ta.input_value()
-            if val and len(val.strip()) > 5:
+            val = ta.input_value() or ""
+            if val.strip() and len(val.strip()) > 5:
                 return False
 
-            label_text = await self._get_label_for(page, ta)
+            label_text = self._get_label_for(page, ta)
             label_lower = label_text.lower()
-            name = (await self._attr(ta, "name")).lower()
-            ph = (await self._attr(ta, "placeholder")).lower()
+            name = (_attr(ta, "name")).lower()
+            ph = (_attr(ta, "placeholder")).lower()
             combined = f"{name} {ph} {label_lower}"
 
             answer = ""
-
-            # Cover letter field?
-            if any(kw in combined for kw in
-                   ["cover letter", "cover_letter", "coverletter",
-                    "why are you interested", "why apply", "message to hiring",
-                    "additional information"]):
+            if any(kw in combined for kw in [
+                "cover letter", "cover_letter", "coverletter",
+                "why are you interested", "why apply",
+                "message to hiring", "additional information",
+            ]):
                 answer = cover_letter or self._default_cover(job)
-            # General text question
             elif get_answer:
                 answer = get_answer(label_text) or get_answer(combined)
 
             if not answer:
                 answer = self._fallback_text_answer(combined, job)
-
             if not answer:
                 return False
 
-            css = await self._css_for(ta)
-            await ta.click()
-            await self._rand(0.3, 0.8)
-            await self.browser_engine.type_human(page, css, answer[:2000])
+            css = _css_for(ta)
+            ta.click()
+            self.browser.random_delay(0.3, 0.8)
+            self.browser.type_human(page, css, answer[:2000])
             return True
         except Exception:
             return False
 
-    async def _handle_select(self, page, sel_el, job: Dict) -> bool:
-        """Handle a <select> dropdown."""
+    def _handle_select(self, page, sel_el, job: Dict) -> bool:
         try:
-            label_text = await self._get_label_for(page, sel_el)
+            label_text = self._get_label_for(page, sel_el)
             label_lower = label_text.lower()
-            name = (await self._attr(sel_el, "name")).lower()
+            name = (_attr(sel_el, "name")).lower()
             combined = f"{name} {label_lower}"
 
-            # Get all options
-            options = await sel_el.query_selector_all("option")
-            opt_values: List[Tuple[str, str]] = []  # (value, text)
+            options = sel_el.query_selector_all("option")
+            opt_values: List[Tuple[str, str]] = []
             for opt in options:
-                ov = await self._attr(opt, "value")
-                ot = await self._txt(opt)
+                ov = _attr(opt, "value")
+                ot = _txt(opt)
                 if ov or ot:
                     opt_values.append((ov, ot))
 
             if not opt_values:
                 return False
 
-            desired = self._resolve_dropdown_answer(combined, opt_values, job)
+            desired = self._resolve_dropdown_answer(
+                combined, opt_values, job)
             if desired:
-                await sel_el.select_option(value=desired)
-                await self._rand(0.3, 0.8)
+                sel_el.select_option(value=desired)
+                self.browser.random_delay(0.3, 0.8)
                 return True
             return False
         except Exception:
             return False
 
-    async def _handle_radio_group(self, page, group, job: Dict) -> bool:
-        """Handle a radio-button group — pick the best option."""
+    def _handle_radio_group(self, page, group, job: Dict) -> bool:
         try:
-            label_text = await self._txt(group)
+            label_text = _txt(group)
             label_lower = label_text.lower()
 
-            radios = await group.query_selector_all('input[type="radio"]')
+            radios = group.query_selector_all('input[type="radio"]')
             if not radios:
                 return False
 
-            # Check if any is already selected
             for r in radios:
-                checked = await r.get_attribute("checked")
-                if checked is not None:
-                    return False  # already answered
+                if r.get_attribute("checked") is not None:
+                    return False
 
-            # Collect options
             radio_opts: List[Tuple[Any, str]] = []
             for r in radios:
-                r_label = await self._get_label_for(page, r)
+                r_label = self._get_label_for(page, r)
                 if not r_label:
-                    parent = await r.evaluate_handle("e => e.parentElement")
-                    r_label = await self._txt(parent)
+                    parent = r.evaluate_handle("e => e.parentElement")
+                    if parent:
+                        r_label = _txt(parent.as_element())
                 radio_opts.append((r, r_label.lower()))
 
-            # Decide which to pick
-            pick = self._resolve_radio_answer(label_lower, radio_opts, job)
+            pick = self._resolve_radio_answer(
+                label_lower, radio_opts, job)
             if pick is not None:
-                css = await self._css_for(pick)
-                await self.browser_engine.click_human(page, css)
-                await self._rand(0.3, 0.8)
+                css = _css_for(pick)
+                self.browser.click_human(page, css)
+                self.browser.random_delay(0.3, 0.8)
                 return True
             return False
         except Exception:
             return False
 
-    async def _handle_checkbox(self, page, cb) -> bool:
-        """Auto-check consent / terms checkboxes."""
+    def _handle_checkbox(self, page, cb) -> bool:
         try:
-            is_checked = await cb.is_checked()
-            if is_checked:
+            if cb.is_checked():
                 return False
 
-            label = await self._get_label_for(page, cb)
+            label = self._get_label_for(page, cb)
             label_lower = label.lower()
 
-            # Auto-check typical consent fields
-            auto_check_keywords = [
-                "agree", "consent", "acknowledge", "terms", "privacy",
-                "confirm", "certify", "authorize", "i have read",
-                "accept", "understand",
+            auto_check = [
+                "agree", "consent", "acknowledge", "terms",
+                "privacy", "confirm", "certify", "authorize",
+                "i have read", "accept", "understand",
             ]
-            for kw in auto_check_keywords:
+            for kw in auto_check:
                 if kw in label_lower:
-                    css = await self._css_for(cb)
-                    await self.browser_engine.click_human(page, css)
-                    await self._rand(0.2, 0.5)
+                    css = _css_for(cb)
+                    self.browser.click_human(page, css)
+                    self.browser.random_delay(0.2, 0.5)
                     return True
             return False
         except Exception:
             return False
 
-    # ── label / question detection ─────────────────────────────────────
-
-    async def _get_label_for(self, page, el) -> str:
+    def _get_label_for(self, page, el) -> str:
         """Find the label associated with a form element."""
         try:
-            # 1. <label for="id">
-            eid = await self._attr(el, "id")
+            eid = _attr(el, "id")
             if eid:
-                lbl = await page.query_selector(f'label[for="{eid}"]')
+                lbl = page.query_selector(f'label[for="{eid}"]')
                 if lbl:
-                    return await self._txt(lbl)
+                    return _txt(lbl)
 
-            # 2. aria-label
-            aria = await self._attr(el, "aria-label")
+            aria = _attr(el, "aria-label")
             if aria:
                 return aria
 
-            # 3. aria-labelledby
-            lblby = await self._attr(el, "aria-labelledby")
+            lblby = _attr(el, "aria-labelledby")
             if lblby:
-                ref = await page.query_selector(f"#{lblby}")
+                ref = page.query_selector(f"#{lblby}")
                 if ref:
-                    return await self._txt(ref)
+                    return _txt(ref)
 
-            # 4. ancestor label
-            ancestor_label = await el.evaluate_handle(
-                "e => e.closest('label') || e.parentElement?.querySelector('label')"
-            )
-            t = await self._txt(ancestor_label)
-            if t:
-                return t
+            # Ancestor label
+            try:
+                ancestor = el.evaluate_handle(
+                    "e => e.closest('label') || "
+                    "e.parentElement?.querySelector('label')")
+                if ancestor:
+                    t = _txt(ancestor.as_element())
+                    if t:
+                        return t
+            except Exception:
+                pass
 
-            # 5. placeholder
-            ph = await self._attr(el, "placeholder")
+            ph = _attr(el, "placeholder")
             if ph:
                 return ph
 
-            # 6. preceding sibling text
-            prev_text = await el.evaluate(
-                """e => {
-                    let p = e.previousElementSibling;
-                    if (p) return p.textContent || '';
-                    let par = e.parentElement;
-                    if (par) {
-                        let label = par.querySelector('label, span, p, div');
-                        if (label && label !== e) return label.textContent || '';
-                    }
-                    return '';
-                }"""
-            )
-            if prev_text and isinstance(prev_text, str):
-                return prev_text.strip()
+            # Preceding sibling text
+            try:
+                prev_text = el.evaluate(
+                    """e => {
+                        let p = e.previousElementSibling;
+                        if (p) return p.textContent || '';
+                        let par = e.parentElement;
+                        if (par) {
+                            let label = par.querySelector('label, span, p, div');
+                            if (label && label !== e) return label.textContent || '';
+                        }
+                        return '';
+                    }""")
+                if prev_text and isinstance(prev_text, str):
+                    return prev_text.strip()
+            except Exception:
+                pass
 
         except Exception:
             pass
@@ -1719,77 +1546,75 @@ class IndeedPlatform(PlatformBase):
 
     # ── answer resolution ──────────────────────────────────────────────
 
-    def _resolve_field_answer(self, combined: str, inp_type: str, job: Dict) -> str:
-        """Return the answer for a text input based on label context."""
+    def _resolve_field_answer(self, combined: str,
+                              inp_type: str, job: Dict) -> str:
         c = combined
-
-        # ── Direct field matches ───────────────────────────────────────
-        if any(k in c for k in ["first name", "firstname", "first_name", "given name"]):
+        if any(k in c for k in ["first name", "firstname",
+                                 "first_name", "given name"]):
             return USER_PROFILE.get("name", "Piyush Kashyap").split()[0]
-        if any(k in c for k in ["last name", "lastname", "last_name", "surname", "family name"]):
+        if any(k in c for k in ["last name", "lastname",
+                                 "last_name", "surname"]):
             parts = USER_PROFILE.get("name", "Piyush Kashyap").split()
             return parts[-1] if len(parts) > 1 else parts[0]
-        if any(k in c for k in ["full name", "fullname", "your name", "name"]) and "company" not in c:
+        if any(k in c for k in ["full name", "fullname",
+                                 "your name", "name"]) and "company" not in c:
             return USER_PROFILE.get("name", "Piyush Kashyap")
         if any(k in c for k in ["email", "e-mail"]) and "company" not in c:
             return USER_PROFILE.get("email", "piyushkashyap3247@gmail.com")
-        if any(k in c for k in ["phone", "mobile", "contact number", "telephone"]):
+        if any(k in c for k in ["phone", "mobile", "contact number"]):
             return USER_PROFILE.get("phone", "+91 73107 03247")
-        if any(k in c for k in ["city", "location", "address"]) and "company" not in c:
+        if any(k in c for k in ["city", "location",
+                                 "address"]) and "company" not in c:
             return USER_PROFILE.get("location", "Rishikesh, Uttarakhand")
         if any(k in c for k in ["linkedin"]):
-            return USER_PROFILE.get("linkedin_url", "https://linkedin.com/in/piyush-kashyap731")
+            return USER_PROFILE.get("linkedin_url",
+                                    "https://linkedin.com/in/piyush-kashyap731")
         if any(k in c for k in ["github", "portfolio", "website"]):
-            return USER_PROFILE.get("github_url", "https://github.com/Piyush731")
-        if any(k in c for k in ["current ctc", "current salary", "current compensation"]):
+            return USER_PROFILE.get("github_url",
+                                    "https://github.com/Piyush731")
+        if any(k in c for k in ["current ctc", "current salary"]):
             return "3.7 LPA"
-        if any(k in c for k in ["expected ctc", "expected salary", "desired salary",
-                                  "salary expectation"]):
+        if any(k in c for k in ["expected ctc", "expected salary",
+                                 "desired salary",
+                                 "salary expectation"]):
             if get_salary_answer:
                 return get_salary_answer(job)
             return "6-10 LPA (negotiable)"
         if any(k in c for k in ["notice period", "notice_period"]):
             return "15 days"
-        if any(k in c for k in ["experience", "total experience", "years of experience",
-                                  "work experience"]) and "relevant" not in c:
+        if any(k in c for k in ["experience", "total experience",
+                                 "years of experience"]) \
+                and "relevant" not in c:
             return str(USER_PROFILE.get("experience_years", 1))
         if any(k in c for k in ["relevant experience"]):
             return str(USER_PROFILE.get("experience_years", 1))
-        if any(k in c for k in ["current company", "current employer", "current organization"]):
+        if any(k in c for k in ["current company",
+                                 "current employer"]):
             return "Site Guru Pvt Ltd"
-        if any(k in c for k in ["current title", "current role", "current designation",
-                                  "job title"]) and "desired" not in c:
-            return USER_PROFILE.get("current_title", "Full Stack Developer L1")
-        if any(k in c for k in ["pincode", "zip code", "postal code", "zip"]):
+        if any(k in c for k in ["current title", "current role",
+                                 "current designation"]) \
+                and "desired" not in c:
+            return USER_PROFILE.get("current_title",
+                                    "Full Stack Developer L1")
+        if any(k in c for k in ["pincode", "zip code", "postal code"]):
             return "249201"
-        if any(k in c for k in ["date of birth", "dob", "birth date"]):
+        if any(k in c for k in ["date of birth", "dob"]):
             return "2003-07-31"
 
-        # ── profile.answers fallback ───────────────────────────────────
         if get_answer:
             ans = get_answer(combined)
             if ans:
                 return str(ans)
-        if get_standard:
-            # Try matching known field names
-            for fname in ["name", "email", "phone", "location"]:
-                if fname in c:
-                    val = get_standard(fname)
-                    if val:
-                        return str(val)
 
         return ""
 
-    def _resolve_dropdown_answer(
-        self, combined: str, opts: List[Tuple[str, str]], job: Dict
-    ) -> Optional[str]:
-        """Fuzzy-match the best dropdown option for a question."""
+    def _resolve_dropdown_answer(self, combined: str,
+                                 opts: List[Tuple[str, str]],
+                                 job: Dict) -> Optional[str]:
         c = combined
-
-        # Map question keyword → preferred option keywords
-        preference_map: Dict[str, List[str]] = {
+        preference_map = {
             "experience": ["0-1", "1-2", "0", "1", "fresher", "entry"],
-            "notice": ["immediate", "15", "less than", "0-15", "1-15", "within"],
+            "notice": ["immediate", "15", "less than", "0-15"],
             "relocat": ["yes", "true", "willing"],
             "work auth": ["yes", "authorized", "citizen"],
             "sponsor": ["no", "do not"],
@@ -1799,7 +1624,6 @@ class IndeedPlatform(PlatformBase):
             "education": ["bachelor", "b.tech", "btech", "engineering"],
             "salary": ["negotiable"],
         }
-
         for keyword, prefs in preference_map.items():
             if keyword in c:
                 for pref in prefs:
@@ -1808,30 +1632,23 @@ class IndeedPlatform(PlatformBase):
                             return val
                 break
 
-        # Fallback: pick first non-empty, non-placeholder option
         for val, text in opts:
             tl = text.lower().strip()
-            if tl and tl not in ("select", "choose", "--", "select one",
-                                  "please select", "", "choose one"):
+            if tl and tl not in ("select", "choose", "--",
+                                  "select one", "please select",
+                                  "", "choose one"):
                 return val
-
         return None
 
-    def _resolve_radio_answer(
-        self, label_lower: str, opts: List[Tuple[Any, str]], job: Dict
-    ) -> Any:
-        """Pick the best radio button for a question."""
-        # Positive-preference keywords per question type
-        positive_map: Dict[str, List[str]] = {
-            "authorized": ["yes"],
-            "legally": ["yes"],
-            "sponsorship": ["no"],
-            "relocat": ["yes"],
+    def _resolve_radio_answer(self, label_lower: str,
+                              opts: List[Tuple[Any, str]],
+                              job: Dict) -> Any:
+        positive_map = {
+            "authorized": ["yes"], "legally": ["yes"],
+            "sponsorship": ["no"], "relocat": ["yes"],
             "willing to travel": ["yes"],
-            "background check": ["yes"],
-            "drug test": ["yes"],
-            "18 years": ["yes"],
-            "shift": ["yes"],
+            "background check": ["yes"], "drug test": ["yes"],
+            "18 years": ["yes"], "shift": ["yes"],
             "currently employed": ["yes"],
             "gender": ["prefer not", "male"],
             "veteran": ["no", "prefer not"],
@@ -1840,7 +1657,6 @@ class IndeedPlatform(PlatformBase):
             "ethnicity": ["prefer not"],
             "hear about": ["job board", "indeed", "online"],
         }
-
         for keyword, prefs in positive_map.items():
             if keyword in label_lower:
                 for pref in prefs:
@@ -1849,604 +1665,246 @@ class IndeedPlatform(PlatformBase):
                             return el
                 break
 
-        # Default: pick "Yes" if available, else first option
         for el, text in opts:
             if text.strip().lower() == "yes":
                 return el
         return opts[0][0] if opts else None
 
     def _fallback_text_answer(self, combined: str, job: Dict) -> str:
-        """Last-resort generic answer for unmatched text fields."""
         c = combined
-        if any(kw in c for kw in ["why", "interest", "motivation", "reason"]):
+        if any(kw in c for kw in ["why", "interest", "motivation"]):
             company = job.get("company", "your company")
             title = job.get("title", "this role")
             return (
                 f"I am excited about the {title} role at {company}. "
-                f"With hands-on experience building 10+ production applications "
-                f"as a sole developer, I bring strong full-stack skills and "
-                f"ownership mentality. I am eager to contribute and grow."
+                f"With hands-on experience building 10+ production "
+                f"applications as a sole developer, I bring strong "
+                f"full-stack skills and ownership mentality."
             )
-        if any(kw in c for kw in ["strength", "skill", "qualification"]):
+        if any(kw in c for kw in ["strength", "skill",
+                                   "qualification"]):
             return (
-                "Full-stack development (Vue.js, Node.js, Java Spring Boot), "
-                "end-to-end project ownership, 10+ production apps, "
-                "database design, REST APIs, WebSocket integrations."
+                "Full-stack development (Vue.js, Node.js, Java "
+                "Spring Boot), end-to-end project ownership, "
+                "10+ production apps, REST APIs, WebSockets."
             )
         return ""
 
     def _default_cover(self, job: Dict) -> str:
-        """Short default cover letter when none is provided."""
         company = job.get("company", "your company")
         title = job.get("title", "the open position")
         return (
             f"Dear Hiring Team,\n\n"
-            f"I am writing to express my strong interest in the {title} role at {company}. "
-            f"As a Full Stack Developer with experience building 10+ production applications "
-            f"independently — spanning fintech, ERP, CRM, and edtech domains — I am confident "
-            f"I can contribute meaningfully to your team.\n\n"
+            f"I am writing to express my strong interest in the "
+            f"{title} role at {company}. As a Full Stack Developer "
+            f"with experience building 10+ production applications "
+            f"independently, I am confident I can contribute "
+            f"meaningfully to your team.\n\n"
             f"Key highlights:\n"
-            f"• Sole developer on multi-tenant ERP with 57+ DB tables\n"
-            f"• Real-time WebSocket integrations, third-party API work (META, Razorpay, RTO)\n"
+            f"• Sole developer on multi-tenant ERP (57+ DB tables)\n"
+            f"• WebSocket integrations, third-party APIs "
+            f"(META, Razorpay, RTO)\n"
             f"• Published app on Google Play Store\n"
-            f"• Proficient in JavaScript, Java, Python, Vue.js, Node.js, Spring Boot\n\n"
-            f"I am available to join within 15 days and am eager to discuss how my background "
-            f"aligns with your needs.\n\n"
+            f"• JavaScript, Java, Python, Vue.js, Node.js, "
+            f"Spring Boot\n\n"
+            f"Available within 15 days.\n\n"
             f"Best regards,\nPiyush Kashyap\n"
             f"+91 73107 03247 | piyushkashyap3247@gmail.com"
         )
 
     # ═══════════════════════════════════════════════════════════════════
-    #  SUBMIT APPLICATION
+    # SUBMIT APPLICATION
     # ═══════════════════════════════════════════════════════════════════
 
-    async def submit_application(self, prepared: Dict) -> Dict:
-        """
-        Click the final Submit button after Telegram approval.
+    def submit_application(self, prepared: Dict) -> Dict:
+        """Click final Submit button after Telegram approval."""
+        jid = str(prepared.get("job", {}).get(
+            "id", prepared.get("job", {}).get(
+                "platform_job_id", "unknown")))
+        logger.info("═══ Submitting application %s ═══", jid)
 
-        Parameters
-        ----------
-        prepared : dict
-            The dict returned by ``prepare_application``.
-
-        Returns
-        -------
-        dict
-            ``{success: bool, job_id, method, applied_at?, error?}``
-        """
-        jid = str(prepared.get("job_id", "unknown"))
-        self.logger.info("═══ Submitting application %s ═══", jid)
+        result = {
+            "success": False,
+            "status": "failed",
+            "error": None,
+            "timestamp": datetime.now().isoformat(),
+        }
 
         state = self._prepared.pop(jid, None)
         if not state:
-            return {"success": False, "job_id": jid,
-                    "error": "No prepared state found — call prepare_application first"}
+            result["error"] = "No prepared state — call prepare first"
+            return result
 
         apply_page = state.get("apply_page")
         if not apply_page:
-            return {"success": False, "job_id": jid, "error": "Apply page lost"}
+            result["error"] = "Apply page lost"
+            return result
 
         try:
-            # Find submit button
-            submit_btn = await self._el(apply_page, "submit_button", timeout=8000)
+            submit_btn = _find(apply_page, "submit_button", timeout=8000)
             if not submit_btn:
-                await self._screenshot(apply_page, f"indeed_no_submit_{jid}")
-                return {"success": False, "job_id": jid,
-                        "error": "Submit button not found on page"}
+                self.browser.take_screenshot(
+                    apply_page, f"indeed_no_submit_{jid}")
+                result["error"] = "Submit button not found"
+                return result
 
-            # Click submit
-            css = await self._css_for(submit_btn)
-            await self.browser_engine.click_human(apply_page, css)
-            await self._rand(3, 6)
+            css = _css_for(submit_btn)
+            self.browser.click_human(apply_page, css)
+            self.browser.random_delay(3, 6)
 
-            # Verify submission
-            try:
-                html = (await apply_page.content()).lower()
-            except Exception:
-                html = ""
+            # Verify
+            html = self.browser.get_page_html(apply_page).lower()
+            url = self.browser.get_page_url(apply_page)
 
-            if self._is_success_page(html, apply_page.url):
-                now = datetime.now().isoformat()
+            if self._is_success_page(html, url):
                 self._last_apply_ts = datetime.now()
                 self.increment_count()
-                self.logger.info("  ✅ Application SUBMITTED for %s", jid)
-                await self._close_extra_tabs()
-                return {
-                    "success": True,
-                    "job_id": jid,
-                    "method": "indeed_apply",
-                    "applied_at": now,
-                }
+                result["success"] = True
+                result["status"] = "submitted"
+                logger.info("  ✅ Application SUBMITTED for %s", jid)
+                self._close_extra_tabs(apply_page)
+                return result
 
-            # Maybe redirect / page changed — check once more
-            await self._rand(2, 4)
-            try:
-                html2 = (await apply_page.content()).lower()
-            except Exception:
-                html2 = ""
-            if self._is_success_page(html2, apply_page.url):
-                now = datetime.now().isoformat()
+            # Wait and retry check
+            self.browser.random_delay(2, 4)
+            html2 = self.browser.get_page_html(apply_page).lower()
+            url2 = self.browser.get_page_url(apply_page)
+            if self._is_success_page(html2, url2):
                 self._last_apply_ts = datetime.now()
                 self.increment_count()
-                await self._close_extra_tabs()
-                return {
-                    "success": True,
-                    "job_id": jid,
-                    "method": "indeed_apply",
-                    "applied_at": now,
-                }
+                result["success"] = True
+                result["status"] = "submitted"
+                self._close_extra_tabs(apply_page)
+                return result
 
-            # Not confirmed — screenshot for debug
-            await self._screenshot(apply_page, f"indeed_submit_unclear_{jid}")
-            self.logger.warning("  ⚠ Submit clicked but confirmation unclear")
-            # Optimistic — count it
+            # Optimistic count
             self._last_apply_ts = datetime.now()
             self.increment_count()
-            await self._close_extra_tabs()
-            return {
-                "success": True,
-                "job_id": jid,
-                "method": "indeed_apply",
-                "applied_at": datetime.now().isoformat(),
-                "note": "Submit clicked, confirmation unclear",
-            }
+            result["success"] = True
+            result["status"] = "submitted"
+            result["note"] = "Submit clicked, confirmation unclear"
+            self._close_extra_tabs(apply_page)
+            return result
 
         except Exception as exc:
-            self.logger.error("submit_application error: %s", exc)
-            self.db.save_error("indeed.submit_application", type(exc).__name__,
-                               str(exc), tb_module.format_exc())
-            await self._close_extra_tabs()
-            return {"success": False, "job_id": jid, "error": str(exc)}
+            logger.error("submit_application error: %s", exc)
+            self._save_error("submit_application", exc)
+            result["error"] = str(exc)
+            self._close_extra_tabs(self._get_page())
+            return result
 
     # ═══════════════════════════════════════════════════════════════════
-    #  CHECK STATUS
+    # CHECK STATUS
     # ═══════════════════════════════════════════════════════════════════
 
-    async def check_status(self, application_id: int = None) -> str:
-        """
-        Check application status on Indeed's "My Jobs" page.
-
-        Returns one of: submitted, viewed, interview, rejected, unknown.
-        """
-        self.logger.info("Checking Indeed application status")
-        if not self.page:
-            return "unknown"
+    def check_status(self, application_id: Optional[int] = None) -> str:
+        """Check application status on Indeed's My Jobs page."""
+        logger.info("Checking Indeed application status")
+        page = self._get_page()
 
         try:
-            await self.page.goto(
-                f"{_BASE_URL}/myjobs?advn=1",
-                wait_until="domcontentloaded",
-                timeout=30_000,
-            )
-            await self._rand(2, 4)
-            await self._dismiss_popups(self.page)
+            self.browser.navigate(page, f"{_BASE_URL}/myjobs?advn=1")
+            self.browser.random_delay(2, 4)
+            self._dismiss_popups(page)
 
-            # Look for status indicators on applied jobs
+            html = self.browser.get_page_html(page).lower()
+
             status_indicators = {
-                "viewed": ["employer viewed", "viewed by employer", "application viewed"],
+                "viewed": ["employer viewed", "viewed by employer"],
                 "interview": ["interview", "scheduled"],
-                "rejected": ["not selected", "position filled", "not moving forward"],
+                "rejected": ["not selected", "position filled"],
             }
-
-            html = ""
-            try:
-                html = (await self.page.content()).lower()
-            except Exception:
-                pass
-
             for status, keywords in status_indicators.items():
                 for kw in keywords:
                     if kw in html:
                         return status
-
             return "submitted"
 
         except Exception as exc:
-            self.logger.error("check_status error: %s", exc)
+            logger.error("check_status error: %s", exc)
             return "unknown"
 
     # ═══════════════════════════════════════════════════════════════════
-    #  CAPTCHA + OTP
-    # ═══════════════════════════════════════════════════════════════════
-
-    async def detect_captcha(self, page) -> Optional[str]:
-        """Return captcha type if detected, else None."""
-        try:
-            url = page.url.lower()
-            html = ""
-            try:
-                html = (await page.content()).lower()
-            except Exception:
-                pass
-
-            # URL-based detection
-            if "captcha" in url or "challenge" in url:
-                return "page_captcha"
-
-            # reCAPTCHA iframe
-            for sel in _SEL.get("captcha_frame", []):
-                try:
-                    el = await page.wait_for_selector(sel, timeout=1500)
-                    if el:
-                        return "recaptcha"
-                except Exception:
-                    continue
-
-            # Text CAPTCHA
-            text_captcha_sels = [
-                'input[name*="captcha"]',
-                'input[id*="captcha"]',
-                'img[src*="captcha"]',
-                '#captcha',
-            ]
-            for sel in text_captcha_sels:
-                try:
-                    el = await page.wait_for_selector(sel, timeout=1000)
-                    if el:
-                        return "text"
-                except Exception:
-                    continue
-
-            # Cloudflare / bot detection
-            if any(kw in html for kw in [
-                "verify you are human",
-                "just a moment",
-                "checking your browser",
-                "unusual traffic",
-                "are you a robot",
-            ]):
-                return "bot_detection"
-
-        except Exception:
-            pass
-        return None
-
-    async def handle_captcha(self, page, notifier=None) -> bool:
-        """
-        Handle CAPTCHA:
-        - text → screenshot + Telegram → user provides answer
-        - recaptcha → retry clicks, if stuck → screenshot + Telegram
-        - bot detection → wait + retry
-        """
-        cap_type = await self.detect_captcha(page)
-        if not cap_type:
-            return True  # no captcha
-
-        self.logger.warning("Handling CAPTCHA type: %s", cap_type)
-        notifier = notifier or self.notifier
-
-        if cap_type == "bot_detection":
-            # Wait and hope it resolves
-            for attempt in range(3):
-                await self._rand(5, 10)
-                new_cap = await self.detect_captcha(page)
-                if not new_cap:
-                    return True
-            # Still stuck — ask user
-            if notifier:
-                ss = await self._screenshot(page, "indeed_bot_detection")
-                try:
-                    notifier.send_platform_issue(
-                        "indeed",
-                        "🤖 *Indeed Bot Detection*\n\n"
-                        "Please solve it in the open browser window.\n"
-                        "The agent will continue after detection clears.",
-                    )
-                except Exception:
-                    pass
-            # Wait up to 3 minutes
-            for _ in range(36):
-                await asyncio.sleep(5)
-                new_cap = await self.detect_captcha(page)
-                if not new_cap:
-                    return True
-            return False
-
-        if cap_type == "recaptcha":
-            # Try clicking the checkbox
-            try:
-                frames = page.frames
-                for frame in frames:
-                    try:
-                        checkbox = await frame.wait_for_selector(
-                            ".recaptcha-checkbox-border", timeout=3000
-                        )
-                        if checkbox:
-                            await checkbox.click()
-                            await self._rand(3, 6)
-                            new_cap = await self.detect_captcha(page)
-                            if not new_cap:
-                                return True
-                    except Exception:
-                        continue
-            except Exception:
-                pass
-
-            # Couldn't auto-solve — ask user
-            if notifier:
-                ss = await self._screenshot(page, "indeed_recaptcha")
-                try:
-                    notifier.send_platform_issue(
-                        "indeed",
-                        "🧩 *reCAPTCHA on Indeed*\n\n"
-                        "Please solve it in the open browser window.\n"
-                        "⏱ Waiting up to 3 minutes.",
-                    )
-                except Exception:
-                    pass
-            for _ in range(36):
-                await asyncio.sleep(5)
-                new_cap = await self.detect_captcha(page)
-                if not new_cap:
-                    return True
-            return False
-
-        if cap_type == "text":
-            if notifier:
-                ss = await self._screenshot(page, "indeed_text_captcha")
-                try:
-                    answer = notifier.send_captcha_challenge(ss, "text")
-                    if answer:
-                        # Find captcha input and enter
-                        inp_sels = [
-                            'input[name*="captcha"]',
-                            'input[id*="captcha"]',
-                            '#captchaInput',
-                            'input[type="text"]:visible',
-                        ]
-                        for sel in inp_sels:
-                            try:
-                                inp = await page.wait_for_selector(sel, timeout=2000)
-                                if inp:
-                                    await self.browser_engine.type_human(page, sel, answer)
-                                    # Submit
-                                    sub = await page.query_selector(
-                                        'button[type="submit"], input[type="submit"]'
-                                    )
-                                    if sub:
-                                        await sub.click()
-                                    await self._rand(2, 4)
-                                    new_cap = await self.detect_captcha(page)
-                                    return new_cap is None
-                            except Exception:
-                                continue
-                except Exception:
-                    pass
-            return False
-
-        # page_captcha or unknown — wait for user
-        if notifier:
-            await self._screenshot(page, "indeed_captcha_unknown")
-            try:
-                notifier.send_platform_issue(
-                    "indeed",
-                    f"⚠️ *CAPTCHA ({cap_type}) on Indeed*\n"
-                    f"Please solve in browser. Waiting 3 min.",
-                )
-            except Exception:
-                pass
-        for _ in range(36):
-            await asyncio.sleep(5)
-            if not await self.detect_captcha(page):
-                return True
-        return False
-
-    async def detect_otp_page(self, page) -> bool:
-        """Check if current page is asking for OTP / verification code."""
-        try:
-            html = ""
-            try:
-                html = (await page.content()).lower()
-            except Exception:
-                pass
-            otp_keywords = [
-                "verification code",
-                "enter code",
-                "enter the code",
-                "one-time",
-                "otp",
-                "sent to your email",
-                "sent a code",
-                "verify your identity",
-            ]
-            for kw in otp_keywords:
-                if kw in html:
-                    return True
-        except Exception:
-            pass
-        return False
-
-    async def handle_otp(self, page, notifier=None) -> bool:
-        """Ask user for OTP via Telegram and enter it."""
-        notifier = notifier or self.notifier
-        if not notifier:
-            self.logger.error("OTP needed but no notifier configured")
-            return False
-
-        self.logger.info("OTP page detected — requesting from user")
-        try:
-            otp = notifier.send_otp_request("indeed")
-            if not otp:
-                self.logger.error("OTP not received in time")
-                return False
-
-            # Find OTP input
-            otp_sels = [
-                'input[name*="code"]',
-                'input[name*="otp"]',
-                'input[name*="verification"]',
-                'input[type="tel"]',
-                'input[type="number"]',
-                'input[inputmode="numeric"]',
-                'input[type="text"]:visible',
-            ]
-            for sel in otp_sels:
-                try:
-                    inp = await page.wait_for_selector(sel, timeout=2000, state="visible")
-                    if inp:
-                        await self.browser_engine.type_human(page, sel, otp)
-                        await self._rand(0.5, 1.0)
-                        # Submit
-                        sub_sels = [
-                            'button[type="submit"]',
-                            'button:has-text("Verify")',
-                            'button:has-text("Continue")',
-                            'button:has-text("Submit")',
-                            'input[type="submit"]',
-                        ]
-                        for ss in sub_sels:
-                            try:
-                                btn = await page.wait_for_selector(ss, timeout=2000)
-                                if btn:
-                                    await btn.click()
-                                    break
-                            except Exception:
-                                continue
-                        await self._rand(3, 5)
-                        # Check if OTP page is gone
-                        if not await self.detect_otp_page(page):
-                            self.logger.info("✅ OTP accepted")
-                            return True
-                except Exception:
-                    continue
-
-            self.logger.error("Could not enter OTP")
-            return False
-        except Exception as exc:
-            self.logger.error("OTP handling error: %s", exc)
-            return False
-
-    # ═══════════════════════════════════════════════════════════════════
-    #  RATE LIMITING
+    # RATE LIMITING
     # ═══════════════════════════════════════════════════════════════════
 
     def _can_apply_now(self) -> bool:
-        """Check daily cap + min gap between applications."""
         if not self.can_apply():
-            self.logger.info("Daily limit reached (%d/%d)", self.get_daily_count(),
-                             self.max_daily)
             return False
-
         if self.is_in_cooldown():
-            self.logger.info("Platform in cooldown")
             return False
-
         if self._last_apply_ts:
             elapsed = (datetime.now() - self._last_apply_ts).total_seconds()
             if elapsed < self._gap_min:
-                wait = self._gap_min - elapsed
-                self.logger.info("Rate limit: wait %.0fs more", wait)
+                logger.info("Rate limit: wait %.0fs more",
+                            self._gap_min - elapsed)
                 return False
-
         return True
-
-    async def _enforce_gap(self):
-        """Sleep the remaining gap time if needed."""
-        if self._last_apply_ts:
-            elapsed = (datetime.now() - self._last_apply_ts).total_seconds()
-            needed = random.uniform(self._gap_min, self._gap_max)
-            if elapsed < needed:
-                wait = needed - elapsed
-                self.logger.info("Enforcing %.0fs gap between applications", wait)
-                await asyncio.sleep(wait)
-
-    # ═══════════════════════════════════════════════════════════════════
-    #  CLEANUP
-    # ═══════════════════════════════════════════════════════════════════
-
-    async def close(self):
-        """Save cookies and close browser."""
-        try:
-            if self.page:
-                await self.browser_engine.save_cookies("indeed")
-                self.logger.info("Cookies saved for indeed")
-        except Exception as exc:
-            self.logger.warning("Error saving cookies: %s", exc)
-
-        try:
-            await self.browser_engine.close("indeed")
-        except Exception:
-            pass
-
-        self.page = None
-        self.logger.info("IndeedPlatform closed")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  MAIN — standalone test
+# SELF TEST
 # ═══════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    """
-    Quick smoke test:
-      python platforms/indeed.py
+    print("=" * 60)
+    print("  Indeed Platform — Smoke Test")
+    print("=" * 60)
 
-    Tests login → search → fetch details for the first result.
-    Requires .env with GEMINI / TELEGRAM / etc. and a working browser.
-    """
-    import sys
+    # ── 1. Import check ──
+    print("\n[1] Import check:")
+    print(f"  ✓ IndeedPlatform loaded")
+    print(f"  answers.py: {'✓' if get_answer else '⚠ not available'}")
 
-    async def _test():
-        from core.browser import BrowserEngine
+    # ── 2. Parsers ──
+    print("\n[2] Skill extraction:")
+    test_jd = ("We need a Java developer with Spring Boot, "
+               "Docker, Kubernetes, and REST API experience.")
+    skills = _extract_skills(test_jd)
+    print(f"  JD: '{test_jd}'")
+    print(f"  Skills: {skills}")
+    assert "Java" in skills, "Java not found!"
+    assert "Docker" in skills, "Docker not found!"
+    print("  ✓ Skill extraction OK")
 
-        # Optional notifier (won't crash if not built yet)
-        notifier = None
-        try:
-            from tracking.notifications import JobNotifier
-            notifier = JobNotifier()
-        except Exception:
-            print("[WARN] Notifier not available — running without Telegram")
+    # ── 3. Answer resolution ──
+    print("\n[3] Answer resolution:")
+    from core.browser import BrowserEngine
+    engine = BrowserEngine()
+    indeed = IndeedPlatform(engine)
 
-        engine = BrowserEngine()
-        indeed = IndeedPlatform(engine, notifier)
+    test_job = {"title": "SDE-1", "company": "Flipkart",
+                "salary_min": 600000, "salary_max": 1200000}
 
-        print("\n══════════════════════════════════════════")
-        print("  Indeed Platform — Smoke Test")
-        print("══════════════════════════════════════════\n")
+    tests = [
+        ("email address", "email", "piyushkashyap3247"),
+        ("phone number", "tel", "73107"),
+        ("current ctc", "text", "3.7"),
+        ("notice period", "text", "15"),
+        ("total experience", "text", "1"),
+    ]
+    for label, inp_type, expected_contains in tests:
+        ans = indeed._resolve_field_answer(label, inp_type, test_job)
+        ok = expected_contains.lower() in ans.lower()
+        print(f"  {'✓' if ok else '✗'} '{label}' → '{ans}'")
 
-        # ── Login ──────────────────────────────────────────────────────
-        print("[1/3] Logging in …")
-        ok = await indeed.login()
-        if not ok:
-            print("❌ Login failed. Exiting.")
-            await indeed.close()
-            return
+    # ── 4. Cover letter ──
+    print("\n[4] Default cover letter:")
+    cover = indeed._default_cover(test_job)
+    print(f"  Length: {len(cover)} chars")
+    assert "Flipkart" in cover
+    assert "SDE-1" in cover
+    print("  ✓ Cover letter OK")
 
-        # ── Search ─────────────────────────────────────────────────────
-        print("\n[2/3] Searching …")
-        jobs = await indeed.search_jobs(
-            queries=["full stack developer"],
-            filters={"locations": ["Bangalore"], "fromage": 7},
-        )
-        print(f"  → Found {len(jobs)} unique jobs")
+    # ── 5. Browser integration ──
+    print("\n[5] Browser integration:")
+    assert hasattr(indeed, 'browser'), "self.browser missing!"
+    assert indeed.browser is engine, "self.browser != engine!"
+    print("  ✓ self.browser OK")
 
-        if jobs:
-            for j in jobs[:5]:
-                print(f"     • {j['title']} @ {j['company']} — {j['location']}")
+    for m in ['can_apply', 'increment_count', 'detect_captcha',
+              'handle_captcha', 'detect_otp_page', 'handle_otp']:
+        assert hasattr(indeed, m), f"{m} missing!"
+        print(f"  ✓ {m}")
 
-            # ── Details ────────────────────────────────────────────────
-            print(f"\n[3/3] Fetching details for first job …")
-            details = await indeed.get_job_details(jobs[0]["url"])
-            if details:
-                print(f"  Title   : {details.get('title')}")
-                print(f"  Company : {details.get('company')}")
-                print(f"  Location: {details.get('location')}")
-                print(f"  Skills  : {', '.join(details.get('skills', []))}")
-                print(f"  Apply?  : {details.get('has_indeed_apply')}")
-                desc = details.get("description", "")
-                print(f"  JD      : {desc[:200]}…" if len(desc) > 200 else f"  JD: {desc}")
-            else:
-                print("  ⚠ Could not fetch details")
-        else:
-            print("  No jobs found — try different queries / locations")
-
-        # ── Cleanup ────────────────────────────────────────────────────
-        print("\nCleaning up …")
-        await indeed.close()
-        print("\n✅ Test complete.\n")
-
-    try:
-        asyncio.run(_test())
-    except KeyboardInterrupt:
-        print("\nInterrupted.")
-        sys.exit(0)
+    print(f"\n✅ Indeed platform tests complete!\n")
