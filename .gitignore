@@ -1,0 +1,16 @@
+.env
+venv/
+browser_profiles/
+resume/output/
+venv/
+__pycache__/
+logs/
+data/
+cache/
+.vscode/
+.idea/
+.DS_Store
+*.pyc
+*.pyo
+*.pyd
+Project_context.txt

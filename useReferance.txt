@@ -1,0 +1,55 @@
+
+QUICK REFERENCE — After Setup
+Bash
+
+# DAILY COMMANDS (once agent is running):
+
+# Start the agent
+cd ~/job_agent && source venv/bin/activate
+nohup python main.py --start > agent.log 2>&1 &
+
+# Check status
+python main.py --status
+
+# View applications
+python main.py --history
+
+# Web dashboard
+python main.py --web  # opens localhost:5000
+
+# Stop agent
+python main.py --stop
+
+# Restart
+kill $(cat job_agent.pid) && nohup python main.py --start > agent.log 2>&1 &
+
+POTENTIAL ISSUES TO KNOW
+text
+
+ISSUE 1: Playwright needs real display for non-headless mode
+  On Linux Mint desktop: ✅ No problem (you have a display)
+  On server/SSH: Need Xvfb (virtual display)
+  For you: NOT an issue — you're running on desktop
+
+ISSUE 2: Naukri/Indeed may change their HTML structure
+  Platform files (.py) need updating when sites redesign
+  This happens every few months
+  Fix: Update CSS selectors in the platform file
+
+ISSUE 3: Gmail blocks SMTP if too many emails
+  Daily limit: 500 emails/day (Gmail)
+  We're sending max 30/day — well under limit
+  If blocked: wait 24h, it auto-unblocks
+
+ISSUE 4: Gemini rate limiting during peak hours
+  Free tier: 15 RPM → sometimes hit during batch scoring
+  Fix: Auto-fallback to Groq (built into llm_client.py)
+
+ISSUE 5: Browser profiles get corrupted
+  Rare but happens
+  Fix: Delete browser_profiles/{platform}/ → re-login
+
+  Test the file:
+   python config.py
+   # Should run the if __name__ == "__main__" test block
+   # Should print "✅ All tests passed" or similar
