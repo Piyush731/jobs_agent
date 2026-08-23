@@ -136,7 +136,7 @@ class _TelegramAPI:
     # ── Convenience methods ──
 
     def send_message(self, chat_id: str, text: str,
-                     parse_mode: str = "Markdown",
+                     parse_mode: Optional[str] = None,
                      reply_markup: Optional[Dict] = None,
                      disable_preview: bool = True) -> Dict:
         data = {
@@ -206,7 +206,7 @@ class _TelegramAPI:
 
     def edit_message_text(self, chat_id: str, message_id: int,
                           text: str,
-                          parse_mode: str = "Markdown") -> Dict:
+                          parse_mode: Optional[str] = None) -> Dict:
         return self._call("editMessageText", {
             "chat_id": chat_id,
             "message_id": message_id,
