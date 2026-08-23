@@ -1135,9 +1135,9 @@ class JobMonitor:
                 return True
         except Exception as exc:
             self.logger.warning(
-                "  Approval flow error: %s – auto-approving", exc
+                "  Approval flow error: %s – skipping safely", exc
             )
-            return True
+            return False
 
     # ══════════════════════════════════════════════════════════════════
     #  HELPER: Apply to a single job

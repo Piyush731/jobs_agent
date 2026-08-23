@@ -347,7 +347,7 @@ STEALTH_CONFIG = {
     "typing_delay": (0.05, 0.15),  # per character
     "session_max_minutes": 45,
     "session_break_minutes": (10, 30),
-    "headless": False,  # Use real visible browser
+    "headless": os.getenv("JOB_AGENT_HEADLESS", "true").strip().lower() in {"1", "true", "yes", "on"},  # Server-safe by default
     "human_mouse_movement": True,
     "active_hours": (8, 23),  # Only operate 8AM-11PM IST
     "skip_probability": 0.05,  # Skip 5% of valid jobs (looks human)
