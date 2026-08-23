@@ -22,7 +22,6 @@ import signal
 import argparse
 import textwrap
 import time
-import asyncio
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
 
@@ -223,10 +222,15 @@ def format_salary(amount):
     try:
         val = float(amount)
         if val >= 100000:
+            # Absolute rupees → convert to LPA
             return f"₹{val / 100000:.1f} LPA"
-        return f"₹{val:,.0f}"
+        elif val > 0:
+            # Already in LPA
+            return f"{val:.1f} LPA"
+        return "—"
     except (ValueError, TypeError):
         return str(amount)
+
 
 
 def format_score(score):
@@ -1107,6 +1111,7 @@ def run_discovery():
         try:
             from discovery.monitor import JobMonitor
             monitor = JobMonitor()
+            monitor._init_components()          # ← ADD THIS
             result = monitor.discover_cycle()
             console.print(f"\n[bold green]Discovery complete![/]")
             for k, v in result.items():
@@ -1115,13 +1120,12 @@ def run_discovery():
             console.print(f"[red]Discovery error: {e}[/]")
             log_error("Discovery error: %s", e)
     else:
-        # Manual discovery without monitor module
         manual_search()
 
     pause()
 
 
-def manual_search():
+def manual_search(cli_platform: str = None, cli_query: str = None):
     """Manual search on a specific platform."""
     clear_screen()
     console.rule("[bold cyan]Manual Job Search[/]", style="cyan")
@@ -1138,39 +1142,48 @@ def manual_search():
         pause()
         return
 
-    console.print("\n[bold]Available platforms:[/]")
-    for i, (key, name) in enumerate(available, 1):
-        note = " [dim](search only)[/]" if key == "linkedin" else ""
-        console.print(f"  {i}. {name}{note}")
-    console.print(f"  0. Cancel")
-
-    choice = Prompt.ask("Choose platform", default="0")
-    if choice == "0":
-        return
-
-    try:
-        idx = int(choice) - 1
-        if not (0 <= idx < len(available)):
-            console.print("[red]Invalid choice.[/]")
+    # If CLI args provided, skip interactive prompts
+    if cli_platform and cli_query:
+        platform_key = cli_platform
+        platform_name = PLATFORM_NAMES.get(platform_key, platform_key)
+        if not AVAILABLE.get(f"platforms.{platform_key}"):
+            console.print(f"[red]Platform module '{platform_key}' not available.[/]")
             pause()
             return
-    except ValueError:
-        console.print("[red]Invalid input.[/]")
-        pause()
-        return
+        queries = [cli_query]
+    else:
+        console.print("\n[bold]Available platforms:[/]")
+        for i, (key, name) in enumerate(available, 1):
+            note = " [dim](search only)[/]" if key == "linkedin" else ""
+            console.print(f"  {i}. {name}{note}")
+        console.print("  0. Cancel")
 
-    platform_key, platform_name = available[idx]
+        choice = Prompt.ask("Choose platform", default="0")
+        if choice == "0":
+            return
 
-    # Get search query
-    platform_config = get_config_val("PLATFORM_CONFIG", {})
-    pconf = platform_config.get(platform_key, {})
-    default_queries = pconf.get("search_queries", ["Full Stack Developer"])
+        try:
+            idx = int(choice) - 1
+            if not (0 <= idx < len(available)):
+                console.print("[red]Invalid choice.[/]")
+                pause()
+                return
+        except ValueError:
+            console.print("[red]Invalid input.[/]")
+            pause()
+            return
 
-    console.print(f"\n[dim]Configured queries: {', '.join(default_queries)}[/]")
-    query = Prompt.ask("Search query (Enter for configured queries)",
-                       default="")
+        platform_key, platform_name = available[idx]
 
-    queries = [query] if query else default_queries
+        # Get search query
+        platform_config = get_config_val("PLATFORM_CONFIG", {})
+        pconf = platform_config.get(platform_key, {})
+        default_queries = pconf.get("search_queries", ["Full Stack Developer"])
+
+        console.print(f"\n[dim]Configured queries: {', '.join(default_queries)}[/]")
+        query = Prompt.ask("Search query (Enter for configured queries)",
+                           default="")
+        queries = [query] if query else default_queries
 
     console.print(f"\n[cyan]Searching {platform_name} for: {', '.join(queries)}[/]")
     console.print("[dim]This may take a minute…[/]\n")
@@ -1214,10 +1227,7 @@ def manual_search():
                 break
             console.print(f"[cyan]Searching: '{q}'…[/]")
             try:
-                results = platform.search_jobs(
-                    queries=[q],
-                    filters={}
-                )
+                results = platform.search_jobs(queries=[q], filters={})
                 console.print(f"  Found {len(results)} results")
                 all_jobs.extend(results)
             except Exception as e:
@@ -1231,6 +1241,7 @@ def manual_search():
             return
 
         # Dedup
+        dedup = None
         if AVAILABLE.get("discovery.dedup"):
             from discovery.dedup import Deduplicator
             dedup = Deduplicator()
@@ -1241,7 +1252,7 @@ def manual_search():
             all_jobs = unique_jobs
 
         # Filter (if available)
-        if AVAILABLE.get("discovery.filters"):
+        if AVAILABLE.get("discovery.filters") and AVAILABLE.get("profile.preferences"):
             from discovery.filters import JobFilter
             from profile.preferences import get_preferences
             jf = JobFilter()
@@ -1260,11 +1271,12 @@ def manual_search():
                 try:
                     db.save_job(job)
                     saved_count += 1
-                    # Mark as seen in dedup cache
-                    if AVAILABLE.get("discovery.dedup"):
-                        dedup.mark_seen(job)
-                except Exception as e:
-                    # Likely unique constraint violation (already exists)
+                    if dedup:
+                        try:
+                            dedup.mark_seen(job)
+                        except Exception:
+                            pass
+                except Exception:
                     pass
 
         console.print(f"\n[bold green]✅ Search complete![/]")
@@ -1273,12 +1285,8 @@ def manual_search():
 
         # Show results
         if all_jobs:
-            tbl = Table(
-                title="Search Results",
-                box=box.SIMPLE_HEAVY,
-                show_header=True,
-                header_style="bold",
-            )
+            tbl = Table(title="Search Results", box=box.SIMPLE_HEAVY,
+                        show_header=True, header_style="bold")
             tbl.add_column("#", width=3)
             tbl.add_column("Company", width=20)
             tbl.add_column("Title", width=30)
@@ -1296,7 +1304,6 @@ def manual_search():
                     truncate(j.get("location", ""), 14),
                     sal or "—",
                 )
-
             console.print(tbl)
             if len(all_jobs) > 20:
                 console.print(f"[dim]  … and {len(all_jobs) - 20} more[/]")
@@ -1308,7 +1315,6 @@ def manual_search():
         console.print(f"[dim]{traceback.format_exc()}[/]")
 
     pause()
-
 
 # ═══════════════════════════════════════════════════════════════
 #  7. PROFILE VIEWER
@@ -1718,18 +1724,26 @@ def start_agent():
 
 
 def apply_queue():
-    """Process pending application queue (Phase 3)."""
-    if not AVAILABLE.get("platforms.manager"):
-        console.print("[yellow]Apply queue requires Phase 3 modules "
-                      "(platforms/manager.py, etc.).[/]")
+    """Process pending application queue."""
+    if not AVAILABLE.get("discovery.monitor"):
+        console.print("[yellow]Requires discovery/monitor.py[/]")
         pause()
         return
 
     console.print("[cyan]Processing application queue…[/]")
-    # Phase 3 implementation
-    console.print("[dim]Not yet implemented — coming in Phase 3.[/]")
-    pause()
+    try:
+        from discovery.monitor import JobMonitor
+        monitor = JobMonitor()
+        monitor._init_components()
+        result = monitor.apply_cycle()
+        console.print(f"\n[bold green]Apply cycle complete![/]")
+        for k, v in result.items():
+            console.print(f"  {k}: {v}")
+    except Exception as e:
+        console.print(f"[red]Apply error: {e}[/]")
+        log_error("Apply queue error: %s", e)
 
+    pause()
 
 def resume_tools():
     """Resume tailoring and ATS tools (Phase 2)."""
@@ -1999,10 +2013,9 @@ def main():
 
     if args.search:
         print_banner()
-        console.print(f"[cyan]Searching '{args.search}' on {args.platform}…[/]")
-        # Delegate to manual_search with pre-set params
-        manual_search()
+        manual_search(cli_platform=args.platform, cli_query=args.search)
         return
+
 
     # ── No args → interactive menu ────────────────────────────
     menu_loop()

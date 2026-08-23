@@ -299,7 +299,8 @@ class LinkedInPlatform(PlatformBase):
 
     def __init__(self, browser_engine, notifier=None):
         super().__init__(browser_engine)
-        self.notifier = notifier
+        if notifier:
+            self.set_notifier(notifier)
         self.platform_name = self.PLATFORM_NAME
 
         if not hasattr(self, 'browser'):
@@ -419,11 +420,42 @@ class LinkedInPlatform(PlatformBase):
             pass
 
     def _tg(self, msg: str) -> None:
-        if self.notifier:
+        """Send Telegram alert using base class notifier."""
+        notifier = getattr(self, '_notifier', None)
+        if notifier:
             try:
-                self.notifier.send_platform_issue("linkedin", msg)
+                notifier.send_platform_issue("linkedin", msg)
             except Exception:
                 pass
+
+    def _check_logged_in(self, page) -> bool:
+        """
+        Check if currently logged in to LinkedIn.
+        Named _check_logged_in to avoid collision with base class
+        is_logged_in which may be a bool property.
+        """
+        for sel in _SEL.get("nav_me", []):
+            try:
+                if page.query_selector(sel):
+                    return True
+            except Exception:
+                continue
+
+        url = self.browser.get_page_url(page)
+        if "/feed" in url and "/login" not in url:
+            return True
+
+        for sel in _SEL.get("sign_in_link", []):
+            try:
+                el = page.query_selector(sel)
+                if el and el.is_visible():
+                    return False
+            except Exception:
+                continue
+
+        if "/login" in url or "/authwall" in url:
+            return False
+        return False
 
     # ═══════════════════════════════════════════════════════════
     # LOGIN
@@ -439,7 +471,7 @@ class LinkedInPlatform(PlatformBase):
             self.browser.random_delay(3, 5)
             self._dismiss_popups(page)
 
-            if self._is_logged_in(page):
+            if self._check_logged_in(page):
                 logger.info("✅ LinkedIn: logged in via cookies")
                 self.browser.save_cookies("linkedin")
                 self._update_session(logged_in=True)
@@ -494,11 +526,11 @@ class LinkedInPlatform(PlatformBase):
             # CAPTCHA
             cap = self.detect_captcha(page)
             if cap:
-                self.handle_captcha(page, self.notifier)
+                self.handle_captcha(page, getattr(self, '_notifier', None))
                 self.browser.random_delay(3, 5)
 
             self._dismiss_popups(page)
-            if self._is_logged_in(page):
+            if self._check_logged_in(page):
                 logger.info("✅ LinkedIn: login successful")
                 self.browser.save_cookies("linkedin")
                 self._update_session(logged_in=True)
@@ -508,7 +540,7 @@ class LinkedInPlatform(PlatformBase):
             # Try feed
             self.browser.navigate(page, _FEED_URL)
             self.browser.random_delay(3, 5)
-            if self._is_logged_in(page):
+            if self._check_logged_in(page):
                 logger.info("✅ LinkedIn: login successful (redirect)")
                 self.browser.save_cookies("linkedin")
                 self._update_session(logged_in=True)
@@ -526,30 +558,6 @@ class LinkedInPlatform(PlatformBase):
             self._save_error("login", exc)
             return False
 
-    def _is_logged_in(self, page) -> bool:
-        for sel in _SEL.get("nav_me", []):
-            try:
-                if page.query_selector(sel):
-                    return True
-            except Exception:
-                continue
-
-        url = self.browser.get_page_url(page)
-        if "/feed" in url and "/login" not in url:
-            return True
-
-        for sel in _SEL.get("sign_in_link", []):
-            try:
-                el = page.query_selector(sel)
-                if el and el.is_visible():
-                    return False
-            except Exception:
-                continue
-
-        if "/login" in url or "/authwall" in url:
-            return False
-        return False
-
     def _handle_2fa(self, page) -> bool:
         pin_el = _find(page, "2fa_input", timeout=3000)
         if not pin_el:
@@ -560,9 +568,10 @@ class LinkedInPlatform(PlatformBase):
                   "Provide the verification code.")
 
         code = None
-        if self.notifier:
+        notifier = getattr(self, '_notifier', None)
+        if notifier:
             try:
-                code = self.notifier.send_otp_request("linkedin")
+                code = notifier.send_otp_request("linkedin")
             except Exception:
                 pass
 
@@ -570,7 +579,7 @@ class LinkedInPlatform(PlatformBase):
             logger.info("Waiting 3 min for manual 2FA in browser")
             for _ in range(36):
                 time.sleep(5)
-                if self._is_logged_in(page):
+                if self._check_logged_in(page):
                     return True
                 if not _find(page, "2fa_input", timeout=1000):
                     return True
@@ -585,7 +594,7 @@ class LinkedInPlatform(PlatformBase):
         else:
             self.browser.press_key(page, "Enter")
         self.browser.random_delay(4, 7)
-        return self._is_logged_in(page)
+        return self._check_logged_in(page)
 
     def _handle_challenge(self, page) -> bool:
         challenge = _find(page, "challenge_page", timeout=2000)
@@ -599,7 +608,7 @@ class LinkedInPlatform(PlatformBase):
 
         for _ in range(60):
             time.sleep(5)
-            if self._is_logged_in(page):
+            if self._check_logged_in(page):
                 return True
             cur_url = self.browser.get_page_url(page)
             if "/feed" in cur_url or "/jobs" in cur_url:
@@ -615,7 +624,7 @@ class LinkedInPlatform(PlatformBase):
         logger.info("═══ LinkedIn Search (SCRAPE ONLY) ═══")
         page = self._get_page()
 
-        if not self._is_logged_in(page):
+        if not self._check_logged_in(page):
             logger.warning("Not logged in, attempting login")
             if not self.login():
                 return []
@@ -691,7 +700,7 @@ class LinkedInPlatform(PlatformBase):
 
             cap = self.detect_captcha(page)
             if cap:
-                if not self.handle_captcha(page, self.notifier):
+                if not self.handle_captcha(page, getattr(self, '_notifier', None)):
                     break
 
             # Scroll to load lazy content
@@ -902,7 +911,7 @@ class LinkedInPlatform(PlatformBase):
                 return {}
 
             cap = self.detect_captcha(page)
-            if cap and not self.handle_captcha(page, self.notifier):
+            if cap and not self.handle_captcha(page, getattr(self, '_notifier', None)):
                 return {}
 
             self._human_scroll(page, rounds=random.randint(2, 4))
@@ -1025,13 +1034,6 @@ class LinkedInPlatform(PlatformBase):
 
     def check_status(self, application_id=None) -> str:
         return "not_applicable"
-
-    # ═══════════════════════════════════════════════════════════
-    # CAPTCHA (inherited detect/handle from base, but override)
-    # ═══════════════════════════════════════════════════════════
-
-    # Uses base class detect_captcha/handle_captcha if available.
-    # If base doesn't have them, provide minimal versions:
 
 
 # ═══════════════════════════════════════════════════════════════

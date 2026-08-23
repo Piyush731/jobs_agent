@@ -49,6 +49,8 @@ import json
 import time
 import random
 import traceback as tb_module
+import threading
+import concurrent.futures
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 from urllib.parse import quote_plus, urlencode
@@ -419,12 +421,8 @@ class NaukriPlatform(PlatformBase):
 
     def __init__(self, browser_engine, notifier=None):
         super().__init__(browser_engine)
-        self.notifier = notifier
-        self.platform_name = self.PLATFORM_NAME
-
-        if not hasattr(self, 'browser'):
-            self.browser = browser_engine
-        self._page = None
+        if notifier:
+            self.set_notifier(notifier)
         self._naukri_config = PLATFORM_CONFIG.get("naukri", {})
         self._current_job = None
         logger.info("NaukriPlatform initialized")
@@ -432,18 +430,40 @@ class NaukriPlatform(PlatformBase):
     # ═══════════════════════════════════════════════════════════
     # INTERNAL: Page & Element helpers
     # ═══════════════════════════════════════════════════════════
-
     def _get_page(self):
         """Get or launch the Naukri browser page."""
-        if self._page is not None:
+        # ALWAYS get from browser engine — never cache separately
+        page = self.browser.get_page(self.PLATFORM_NAME)
+        if page is not None:
             try:
-                if not self._page.is_closed():
-                    _ = self._page.url
-                    return self._page
+                if not page.is_closed():
+                    _ = page.url  # probe
+                    self._page = page
+                    return page
             except Exception:
                 pass
-        self._page = self.browser.launch(self.PLATFORM_NAME)
-        return self._page
+        
+        # Need to launch
+        page = self.browser.launch(self.PLATFORM_NAME)
+        self._page = page
+        return page
+    # def _get_page(self):
+    #     if self._page is not None:
+    #         try:
+    #             if not self._page.is_closed():
+    #                 _ = self._page.url
+    #                 return self._page
+    #         except Exception:
+    #             pass
+
+    #     def _launch():
+    #         return self.browser.launch(self.PLATFORM_NAME)
+
+    #     with concurrent.futures.ThreadPoolExecutor() as executor:
+    #         future = executor.submit(_launch)
+    #         self._page = future.result(timeout=30)
+
+    #     return self._page
 
     def _find(self, page, key: str, timeout: int = 3000):
         """
@@ -600,7 +620,7 @@ class NaukriPlatform(PlatformBase):
                 logger.warning(
                     f"CAPTCHA detected on Naukri login: {captcha_type}"
                 )
-                handled = self.handle_captcha(page, self.notifier)
+                handled = self.handle_captcha(page) 
                 if not handled:
                     logger.error("CAPTCHA not solved, login failed")
                     self.browser.take_screenshot(page, "naukri_captcha_fail")
@@ -610,7 +630,7 @@ class NaukriPlatform(PlatformBase):
             # Check for OTP
             if self.detect_otp_page(page):
                 logger.warning("OTP page detected on Naukri login")
-                handled = self.handle_otp(page, self.notifier)
+                handled = self.handle_otp(page)  
                 if not handled:
                     logger.error("OTP not entered, login failed")
                     self.browser.take_screenshot(page, "naukri_otp_fail")

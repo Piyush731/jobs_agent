@@ -35,6 +35,8 @@ import random
 import traceback as tb_module
 from datetime import datetime
 from typing import Optional, List, Dict, Any
+import threading
+import concurrent.futures
 
 from config import PLATFORM_CONFIG, USER_PROFILE, STEALTH_CONFIG
 from core.logger import get_logger
@@ -365,12 +367,19 @@ class PlatformManager:
                 )
 
             # ── Session break check ──
+            # ── Session break check ──
             if self.browser.needs_break(name):
+                session_mins = self.browser.session_time(name)
                 logger.info(
-                    f"Session break needed for '{name}', "
-                    f"skipping this cycle"
+                    f"Session break for '{name}' "
+                    f"({session_mins:.0f}min), closing to reset"
                 )
-                platform_counts[name] = {"status": "break", "count": 0}
+                try:
+                    self.browser.save_cookies(name)
+                    self.browser.close(name)
+                except Exception as e:
+                    logger.debug(f"Error closing '{name}' for break: {e}")
+                platform_counts[name] = {"status": "break_reset", "count": 0}
                 continue
 
             # ── Search ──
@@ -609,12 +618,19 @@ class PlatformManager:
             return result
 
         # ── Session break ──
+        # ── Session break ──
         if self.browser.needs_break(platform_name):
-            result["error"] = (
-                f"'{platform_name}' needs session break"
+            logger.info(
+                f"Session break for '{platform_name}', "
+                f"closing to reset"
             )
-            result["status"] = "break_needed"
-            logger.info(result["error"])
+            try:
+                self.browser.save_cookies(platform_name)
+                self.browser.close(platform_name)
+            except Exception:
+                pass
+            result["error"] = f"'{platform_name}' session reset, retry next cycle"
+            result["status"] = "break_reset"
             return result
 
         # ── Prepare application ──

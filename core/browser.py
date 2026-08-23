@@ -97,81 +97,16 @@ except Exception as e:
 #   - renamed/moved stealth_sync in newer versions
 # Also try alternative import paths for different package versions.
 
-stealth_sync = None  # default
+# ── playwright-stealth ──────────────────────────────────────────
+# v1.x had stealth_sync(page). v2.0.2 has Stealth class + stealth function.
+# The Stealth() class in v2.x corrupts Playwright sync API greenlet.
+# NEVER instantiate Stealth() — use the stealth() function or JS-only.
 
-try:
-    from playwright_stealth import stealth_sync  # standard import
-    _STEALTH_AVAILABLE = True
-    logger.debug("playwright-stealth loaded (standard import)")
-except ImportError:
-    # Package genuinely not installed
-    pass
-except Exception as e:
-    # Package installed but broken internally
-    logger.warning(
-        f"playwright-stealth installed but import failed: "
-        f"{type(e).__name__}: {e}"
-    )
-
-# ── Fallback import paths (different versions/forks) ────────────
-if not _STEALTH_AVAILABLE:
-    # Try 1: some forks put stealth_sync inside a .stealth submodule
-    try:
-        from playwright_stealth.stealth import stealth_sync
-        _STEALTH_AVAILABLE = True
-        logger.debug("playwright-stealth loaded (submodule import)")
-    except Exception:
-        pass
-
-if not _STEALTH_AVAILABLE:
-    # Try 2: some forks export Stealth class instead of stealth_sync
-    try:
-        import playwright_stealth as _ps_module
-        # Check if the module loaded at all (might have stealth_sync somewhere)
-        if hasattr(_ps_module, "stealth_sync"):
-            stealth_sync = _ps_module.stealth_sync
-            _STEALTH_AVAILABLE = True
-            logger.debug("playwright-stealth loaded (attribute lookup)")
-        elif hasattr(_ps_module, "Stealth"):
-            # Wrap class-based API to match our stealth_sync(page) interface
-            _stealth_cls = _ps_module.Stealth
-            def stealth_sync(page):
-                s = _stealth_cls()
-                s.apply(page)
-            _STEALTH_AVAILABLE = True
-            logger.debug("playwright-stealth loaded (class-based wrapper)")
-        else:
-            logger.warning(
-                f"playwright-stealth module found but has no stealth_sync. "
-                f"Available: {[a for a in dir(_ps_module) if not a.startswith('_')]}"
-            )
-    except Exception:
-        pass
-
-if not _STEALTH_AVAILABLE:
-    stealth_sync = None
-    # ── Check if pip shows it installed (diagnostic) ────────────
-    _pip_check = ""
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "show", "playwright-stealth"],
-            capture_output=True, text=True, timeout=10
-        )
-        if result.returncode == 0:
-            _pip_check = (
-                " (NOTE: pip shows it IS installed — likely a version "
-                "incompatibility. Try: pip install --upgrade playwright-stealth)"
-            )
-    except Exception:
-        pass
-
-    logger.warning(
-        f"playwright-stealth not available.{_pip_check}\n"
-        "  Install/upgrade for better anti-detection:\n"
-        "    pip install --upgrade playwright-stealth\n"
-        "  The bot will still work, but with weaker anti-detection."
-    )
-
+# ── playwright-stealth ──────────────────────────────────────────
+# v2.0.2 is incompatible with Playwright sync API (kills greenlet).
+# Custom JS stealth below covers all critical detection vectors.
+stealth_sync = None
+_STEALTH_AVAILABLE = False
 
 # ═══════════════════════════════════════════════════════════════════
 # CONSTANTS
@@ -371,23 +306,7 @@ class BrowserEngine:
                headless: Optional[bool] = None) -> Any:  # returns Page
         """
         Launch (or reuse) a browser for a specific platform.
-
-        Each platform gets its own persistent Chromium profile directory
-        at browser_profiles/{platform}/. Cookies, localStorage, IndexedDB,
-        and all browser state persist across runs automatically.
-
-        Stealth patches are applied on every launch.
-
-        Args:
-            platform: Platform name ("naukri", "indeed", "linkedin", "foundit", etc.)
-            headless: True/False/None. None uses STEALTH_CONFIG['headless'].
-
-        Returns:
-            Playwright Page object ready for interaction.
-
-        Raises:
-            RuntimeError: If Playwright is not installed.
-            Exception: If browser fails to launch (wrong binary, locked profile, etc.)
+        Returns Playwright Page object ready for interaction.
         """
         # ── Reuse existing live page ──
         if platform in self._pages:
@@ -409,14 +328,10 @@ class BrowserEngine:
 
         profile_dir = BROWSER_PROFILES_DIR / platform
         profile_dir.mkdir(parents=True, exist_ok=True)
-
-        # Remove stale lock files from crashed previous sessions
         self._cleanup_locks(profile_dir)
 
-        # Consistent viewport per platform (different across platforms)
         viewport = self._get_viewport(platform)
 
-        # ── Browser launch args ──
         browser_args = [
             "--disable-blink-features=AutomationControlled",
             "--disable-dev-shm-usage",
@@ -428,6 +343,22 @@ class BrowserEngine:
             f"--window-size={viewport['width']},{viewport['height']}",
         ]
 
+        launch_kwargs = dict(
+            user_data_dir=str(profile_dir),
+            headless=headless,
+            viewport=viewport,
+            locale="en-IN",
+            timezone_id="Asia/Kolkata",
+            color_scheme="light",
+            args=browser_args,
+            ignore_default_args=["--enable-automation"],
+            slow_mo=0,
+            accept_downloads=True,
+        )
+
+        # ── Launch browser context ──
+        context = None
+
         try:
             logger.info(
                 f"Launching browser for '{platform}' "
@@ -435,61 +366,90 @@ class BrowserEngine:
                 f"viewport={viewport['width']}x{viewport['height']}, "
                 f"profile={profile_dir})"
             )
-
             context = self._playwright.chromium.launch_persistent_context(
-                user_data_dir=str(profile_dir),
-                headless=headless,
-                viewport=viewport,
-                locale="en-IN",
-                timezone_id="Asia/Kolkata",
-                color_scheme="light",
-                args=browser_args,
-                ignore_default_args=["--enable-automation"],
-                slow_mo=0,
-                # Accept downloads silently
-                accept_downloads=True,
+                **launch_kwargs
             )
-
-            # ── Get or create page ──
-            if context.pages:
-                page = context.pages[0]
-            else:
-                page = context.new_page()
-
-            # ── Dialog handler ──
-            page.on("dialog", self._handle_dialog)
-
-            # ── Apply stealth ──
-            self._apply_stealth(page, context)
-
-            # ── Store references ──
-            self._contexts[platform] = context
-            self._pages[platform] = page
-            self._session_starts[platform] = datetime.now()
-            self._mouse_pos[platform] = (
-                viewport["width"] // 2,
-                viewport["height"] // 2,
-            )
-
-            logger.info(f"Browser launched for '{platform}'")
-            return page
 
         except Exception as e:
-            msg = str(e)
-            if "Executable doesn't exist" in msg or "executable" in msg.lower():
-                logger.error(
-                    "Chromium browser binary not found.\n"
-                    "Run:  playwright install chromium"
+            err_msg = str(e).lower()
+
+            if "thread" in err_msg or "greenlet" in err_msg:
+                logger.warning(
+                    f"Playwright greenlet dead for '{platform}', "
+                    f"restarting Playwright process: {e}"
                 )
-            elif "lock" in msg.lower() or "already" in msg.lower():
+                try:
+                    self._playwright.stop()
+                except Exception:
+                    pass
+                self._playwright = None
+
+                for p in list(self._contexts.keys()):
+                    self._pages.pop(p, None)
+                    self._contexts.pop(p, None)
+                    self._session_starts.pop(p, None)
+                    self._mouse_pos.pop(p, None)
+
+                self._ensure_playwright()
+
+                try:
+                    context = self._playwright.chromium.launch_persistent_context(
+                        **launch_kwargs
+                    )
+                    logger.info(
+                        f"Playwright restarted successfully for '{platform}'"
+                    )
+                except Exception as e2:
+                    logger.error(
+                        f"Retry also failed for '{platform}': {e2}"
+                    )
+                    raise
+
+            elif "executable" in err_msg:
                 logger.error(
-                    f"Browser profile for '{platform}' is locked "
-                    f"(another instance running?).\n"
+                    "Chromium not found. Run: playwright install chromium"
+                )
+                raise
+            elif "lock" in err_msg or "already" in err_msg:
+                logger.error(
+                    f"Browser profile for '{platform}' is locked. "
                     f"Close other instances or delete: {profile_dir}"
                 )
+                raise
             else:
-                logger.error(f"Failed to launch browser for '{platform}': {e}")
-            raise
+                logger.error(
+                    f"Failed to launch browser for '{platform}': {e}"
+                )
+                raise
+
+        # ══════════════════════════════════════════════════════
+        # THIS IS THE PART THAT WAS MISSING IN YOUR CODE
+        # Everything below MUST run after context is created
+        # ══════════════════════════════════════════════════════
+
+        # ── Get or create page ──
+        if context.pages:
+            page = context.pages[0]
+        else:
+            page = context.new_page()
+
+        # ── Dialog handler ──
+        page.on("dialog", self._handle_dialog)
+
+        # ── Apply stealth ──
+        self._apply_stealth(page, context)
+
+        # ── Store references ──
+        self._contexts[platform] = context
+        self._pages[platform] = page
+        self._session_starts[platform] = datetime.now()
+        self._mouse_pos[platform] = (
+            viewport["width"] // 2,
+            viewport["height"] // 2,
+        )
+
+        logger.info(f"Browser launched for '{platform}'")
+        return page
 
     def get_page(self, platform: str) -> Optional[Any]:
         """
@@ -508,27 +468,30 @@ class BrowserEngine:
     def navigate(self, page: Any, url: str,
                  wait_until: str = "domcontentloaded",
                  timeout: int = 30000) -> bool:
-        """
-        Navigate to URL with error handling and human-like post-load delay.
-
-        Args:
-            page: Playwright Page.
-            url: Target URL.
-            wait_until: "load" | "domcontentloaded" | "networkidle" | "commit"
-            timeout: Milliseconds before giving up.
-
-        Returns:
-            True if navigation succeeded, False on error/timeout.
-        """
         try:
             logger.debug(f"Navigating to: {url}")
             page.goto(url, wait_until=wait_until, timeout=timeout)
-            # Human-like pause after page load
             self.random_delay(1.0, 3.0)
             logger.debug(f"Navigation complete → {page.url}")
             return True
         except Exception as e:
-            logger.error(f"Navigation failed ({url}): {e}")
+            err_msg = str(e).lower()
+            if "thread" in err_msg or "greenlet" in err_msg:
+                logger.error(
+                    f"Navigation failed ({url}): Playwright greenlet dead. "
+                    f"Browser needs restart. Error: {e}"
+                )
+                # Mark playwright as dead so next launch() restarts it
+                platform = self._find_platform_for_page(page)
+                if platform:
+                    self._cleanup_platform(platform)
+                try:
+                    self._playwright.stop()
+                except Exception:
+                    pass
+                self._playwright = None
+            else:
+                logger.error(f"Navigation failed ({url}): {e}")
             return False
 
     def close(self, platform: Optional[str] = None) -> None:
@@ -1757,35 +1720,16 @@ class BrowserEngine:
     # ═══════════════════════════════════════════════════════════
 
     def _apply_stealth(self, page: Any, context: Any) -> None:
-        """
-        Apply all stealth measures to a page/context.
+            """Apply JS-only stealth patches to page and context."""
+            # Inject stealth JS into current page
+            self._inject_stealth_js(page)
 
-        Layers:
-          1. playwright-stealth library (if installed)
-          2. Custom JS patches (_STEALTH_JS)
-          3. Route-based header modifications
-        """
-        # Layer 1: playwright-stealth (comprehensive evasion)
-        if _STEALTH_AVAILABLE and stealth_sync:
+            # Register for all future navigations in this context
             try:
-                stealth_sync(page)
-                logger.debug("playwright-stealth applied")
+                context.add_init_script(_STEALTH_JS)
+                logger.debug("Stealth init script registered")
             except Exception as e:
-                logger.warning(f"playwright-stealth apply failed: {e}")
-        else:
-            logger.debug(
-                "playwright-stealth not available, using JS-only stealth"
-            )
-
-        # Layer 2: Custom JS patches (belt + suspenders)
-        self._inject_stealth_js(page)
-
-        # Layer 3: Also inject on every new document load
-        try:
-            context.add_init_script(_STEALTH_JS)
-            logger.debug("Stealth init script registered for all future navigations")
-        except Exception as e:
-            logger.debug(f"Could not register init script: {e}")
+                logger.debug(f"Could not register init script: {e}")
 
     def _inject_stealth_js(self, page: Any) -> None:
         """Inject stealth JavaScript into a page."""

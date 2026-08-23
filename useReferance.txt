@@ -53,3 +53,104 @@ ISSUE 5: Browser profiles get corrupted
    python config.py
    # Should run the if __name__ == "__main__" test block
    # Should print "✅ All tests passed" or similar
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   Step-by-Step Startup
+Bash
+
+# 1. Navigate to project
+cd ~/job_agent
+
+# 2. Activate virtual environment
+source venv/bin/activate
+
+# 3. Install all dependencies (one time)
+pip install \
+  playwright playwright-stealth \
+  google-generativeai groq \
+  python-docx weasyprint \
+  beautifulsoup4 lxml \
+  requests rapidfuzz \
+  flask rich \
+  apscheduler
+
+# 4. Install Playwright browsers (one time)
+python -m playwright install chromium
+
+# 5. Set up .env file (one time)
+cat > .env << 'EOF'
+NAUKRI_EMAIL=your_naukri_email
+NAUKRI_PASSWORD=your_naukri_pass
+INDEED_EMAIL=your_indeed_email
+LINKEDIN_EMAIL=your_linkedin_email
+LINKEDIN_PASSWORD=your_linkedin_pass
+FOUNDIT_EMAIL=your_foundit_email
+SMTP_EMAIL=your_gmail@gmail.com
+SMTP_PASSWORD=your_gmail_app_password
+GEMINI_API_KEY=your_key_from_ai.google.dev
+GROQ_API_KEY=your_key_from_console.groq.com
+TELEGRAM_BOT_TOKEN=your_bot_token
+TELEGRAM_CHAT_ID=your_chat_id
+HUNTER_API_KEY=
+EOF
+
+# 6. Test everything loads
+python main.py --status
+
+# 7. Test a single search
+python main.py --search "Java Developer" --platform naukri
+
+# 8. Start interactive menu
+python main.py
+
+# 9. OR start full autonomous agent
+python main.py --start
+
+# 10. OR start web dashboard (separate terminal)
+python -m web.app
+# → Open http://localhost:5000
+The 3 Ways to Run
+Command	What it does
+python main.py	Interactive menu — pick what to do
+python main.py --start	Full autonomous loop — discovers, scores, tailors, applies, emails, tracks 24/7
+python -m web.app	Web dashboard at localhost:5000
+What Happens When You Run --start
+text
+
+Every 30 minutes:
+  1. DISCOVER → search Naukri/Indeed/Foundit/LinkedIn
+  2. DEDUP → remove duplicates across platforms
+  3. FILTER → salary/location/experience/blacklist
+  4. SCORE → AI rates each job 0-100
+  5. TAILOR → customize resume per JD
+  6. APPROVE → Telegram asks you ✅/❌
+  7. APPLY → bot fills form + submits
+  8. EMAIL → sends HR email for 80+ score jobs
+  9. FOLLOW-UP → D3/D7/D14 reminders
+  10. REPORT → daily summary at 8 PM via Telegram
+
+
+
+
+
+
+
+
+═══════════════════════════════════════════════════════════

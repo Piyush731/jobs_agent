@@ -261,8 +261,8 @@ EMAIL_CONFIG = {
 # MATCH CONFIG
 # ═══════════════════════════════════════════════════════════
 MATCH_CONFIG = {
-    "min_score_to_apply": 40,
-    "auto_apply_score": 70,  # Skip approval for high matches
+    "min_score_to_apply": 30,
+    "auto_apply_score": 30,  # Skip approval for high matches
     "email_hr_score": 80,  # Email HR directly for 80+ matches
     "weights": {
         "title": 0.25,
@@ -373,8 +373,8 @@ TELEGRAM_CONFIG = {
     "send_responses": True,
     "send_daily_report": True,
     "send_errors": True,
-    "approve_before_apply": True,  # Semi-auto: require approval
-    "approve_timeout_minutes": 30,  # Auto-approve after 30 min
+    "approve_before_apply": False,  # Semi-auto: require approval
+    "approve_timeout_minutes": 1,  # Auto-approve after 30 min
     "captcha_timeout_minutes": 5,
     "otp_timeout_minutes": 2,
     "answer_review_timeout_minutes": 5,
