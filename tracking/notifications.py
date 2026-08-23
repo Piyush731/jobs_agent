@@ -268,7 +268,7 @@ class JobNotifier:
 
     def _send(self, text: str,
               reply_markup: Optional[Dict] = None,
-              parse_mode: str = "Markdown") -> Optional[int]:
+              parse_mode: Optional[str] = None) -> Optional[int]:
         """Send a message. Returns message_id or None."""
         if not self._enabled or not self._api:
             logger.debug("Telegram disabled, skipping: %s",
@@ -451,9 +451,10 @@ class JobNotifier:
 
             time.sleep(3)
 
-        # Timeout → auto-approve (configurable)
-        logger.info("Approval timeout — auto-approving: %s",
-                     callback_id)
+        # Normal applications may auto-approve after the configured timeout.
+        # Human-required flows (CAPTCHA/OTP/unknown fields) never reach this
+        # approval gate: they pause in the platform handler and fail safely.
+        logger.info("Approval timeout — auto-approving: %s", callback_id)
         with self._pending_lock:
             self._pending.pop(callback_id, None)
         self._send(f"⏱ Approval timed out — auto-applied "

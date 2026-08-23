@@ -99,7 +99,7 @@ USER_PROFILE = {
         "Work From Home",
         "Hybrid",
     ],
-    "min_salary": 5.0,  # LPA
+    "min_salary": 6.0,  # LPA — do not target roles below the requested floor
     "preferred_salary_min": 6.0,  # LPA
     "preferred_salary_max": 10.0,  # LPA
     "dream_salary_max": 16.0,  # LPA
@@ -373,8 +373,8 @@ TELEGRAM_CONFIG = {
     "send_responses": True,
     "send_daily_report": True,
     "send_errors": True,
-    "approve_before_apply": False,  # Semi-auto: require approval
-    "approve_timeout_minutes": 1,  # Auto-approve after 30 min
+    "approve_before_apply": True,  # Require explicit approval before submission
+    "approve_timeout_minutes": 30,  # Expiry safely skips; it never auto-submits
     "captcha_timeout_minutes": 5,
     "otp_timeout_minutes": 2,
     "answer_review_timeout_minutes": 5,

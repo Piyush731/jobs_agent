@@ -1128,7 +1128,7 @@ class JobMonitor:
                 self.logger.info("  ❌ User rejected")
                 return False
             else:
-                # timeout or unexpected → auto-approve
+                # Timeout is the configured normal-flow auto-approval.
                 self.logger.info(
                     "  ⏰ Timeout / unknown (%s) – auto-approving", result
                 )
