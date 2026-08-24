@@ -149,7 +149,7 @@ PLATFORM_CONFIG = {
         "max_pages_per_query": 5,
     },
     "indeed": {
-        "enabled": False,
+        "enabled": True,
         "base_url": "https://in.indeed.com",
         "max_daily_applications": 20,
         "search_interval_minutes": 45,
