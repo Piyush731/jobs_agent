@@ -167,7 +167,7 @@ PLATFORM_CONFIG = {
         "max_pages_per_query": 3,
     },
     "foundit": {
-        "enabled": True,
+        "enabled": False,
         "base_url": "https://www.foundit.in",
         "max_daily_applications": 20,
         "search_interval_minutes": 45,
