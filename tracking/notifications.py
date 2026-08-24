@@ -142,9 +142,10 @@ class _TelegramAPI:
         data = {
             "chat_id": chat_id,
             "text": text[:4096],
-            "parse_mode": parse_mode,
             "disable_web_page_preview": disable_preview,
         }
+        if parse_mode:
+            data["parse_mode"] = parse_mode
         if reply_markup:
             data["reply_markup"] = reply_markup
         return self._call("sendMessage", data)
