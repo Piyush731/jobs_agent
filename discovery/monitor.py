@@ -529,17 +529,20 @@ class JobMonitor:
                     job_id, new_status, notes=json.dumps(score_result)
                 )
 
-                # Try to update score columns directly
+                # Persist score through the public database API.
+                # Do not access private connection attributes.
                 try:
-                    conn = getattr(self.db, "_conn", None) or getattr(self.db, "conn", None)
-                    if conn:
-                        conn.execute(
-                            "UPDATE jobs SET match_score=?, match_details=?, priority=? WHERE id=?",
-                            (score, json.dumps(score_result), priority, job_id),
-                        )
-                        conn.commit()
-                except Exception:
-                    pass
+                    self.db.update_job_score(
+                        job_id,
+                        float(score),
+                        details=score_result,
+                    )
+                except Exception as exc:
+                    self.logger.warning(
+                        "Could not persist match score for job %s: %s",
+                        job_id,
+                        exc,
+                    )
 
                 # Log progress
                 if score >= auto_score:
