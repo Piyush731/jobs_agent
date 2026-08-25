@@ -208,11 +208,11 @@ PLATFORM_CONFIG = {
 AI_CONFIG = {
     # Primary — Gemini free tier
     "provider": "gemini",
-    "model": "gemini-2.0-flash",
+    "model": "gemini-3.6-flash",
     "api_key_env": "GEMINI_API_KEY",
     # Backup — Groq free tier
     "backup_provider": "groq",
-    "backup_model": "llama-3.1-70b-versatile",
+    "backup_model": "openai/gpt-oss-20b",
     "backup_api_key_env": "GROQ_API_KEY",
     # Fallback — local Ollama
     "local_provider": "ollama",
