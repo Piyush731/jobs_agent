@@ -1168,24 +1168,49 @@ class NaukriPlatform(PlatformBase):
                 return result
 
             # ── Find Apply button ──
-            apply_sel = self._working_selector(page, "apply_btn")
-            if not apply_sel:
-                result["error"] = "Apply button not found"
+            # ── Find a visible Apply button ──
+            apply_selectors = [
+                "#apply-button:visible",
+                "button.apply-button:visible",
+                "button[class*='apply-button']:visible",
+                "button:has-text('Apply'):visible",
+            ]
+
+            apply_locator = None
+
+            for selector in apply_selectors:
+                try:
+                    locator = page.locator(selector).first
+                    if locator.count() > 0 and locator.is_visible():
+                        apply_locator = locator
+                        break
+                except Exception:
+                    continue
+
+            if apply_locator is None:
+                result["error"] = "No visible Apply button found"
                 result["screenshot"] = self.browser.take_screenshot(
-                    page, "naukri_no_apply_btn"
+                    page, "naukri_no_visible_apply_btn"
                 )
                 return result
 
-            # Scroll to Apply button
-            self.browser.scroll_to_element(page, apply_sel)
-            self.browser.random_delay(0.5, 1.5)
+            try:
+                apply_locator.scroll_into_view_if_needed(timeout=10000)
+                self.browser.random_delay(0.5, 1.5)
 
-            # ── Click Apply ──
-            logger.info(
-                f"Clicking Apply: {job.get('title')} @ "
-                f"{job.get('company')}"
-            )
-            self.browser.click_human(page, apply_sel)
+                logger.info(
+                    f"Clicking visible Apply: {job.get('title')} @ "
+                    f"{job.get('company')}"
+                )
+
+                apply_locator.click(timeout=10000)
+            except Exception as exc:
+                result["error"] = str(exc)
+                result["screenshot"] = self.browser.take_screenshot(
+                    page, "naukri_apply_click_failed"
+                )
+                logger.error("Visible Apply click failed: %s", exc)
+                return result
             self.browser.random_delay(2.0, 4.0)
 
             # ── Detect what happened after click ──
