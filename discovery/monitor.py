@@ -775,11 +775,15 @@ class JobMonitor:
                     apply_result.get("error", "unknown"),
                 )
                 stats["failed"] += 1
-                # Mark as 'apply_failed' so we don't retry forever
+                # An attempted failure is not the same as an intentional skip.
+                # Preserve the reason for dashboard/retry decisions.
+                failure_status = apply_result.get("status") or "apply_failed"
+                if failure_status not in {"external", "human_required", "expired", "already_applied"}:
+                    failure_status = "apply_failed"
                 self.db.update_job_status(
                     job_id,
-                    "skipped",
-                    notes=f"Apply failed: {apply_result.get('error', '')}",
+                    failure_status,
+                    notes=f"Application attempt: {apply_result.get('error', '')}",
                 )
 
             # inter-job delay (human-like)

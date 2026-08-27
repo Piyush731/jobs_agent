@@ -233,11 +233,16 @@ def dashboard():
         except Exception:
             pass
 
+    # Use all-time database totals for the dashboard cards.  The old
+    # implementation mixed today's stats with all-time job counts.
+    all_jobs = db.get_jobs(limit=5000) if db else []
+    all_apps = db.get_applications(limit=5000) if db else []
+    applied_statuses = {"submitted", "viewed", "shortlisted", "interview", "offer"}
     cards = [
-        ("Jobs Discovered", stats.get("discovered", stats.get("today_discovered", 0)), "cyan"),
-        ("Matched", stats.get("matched", stats.get("today_matched", 0)), "yellow"),
-        ("Applied", stats.get("applied", stats.get("today_applied", 0)), "green"),
-        ("Responses", stats.get("responses", stats.get("today_responses", 0)), "purple"),
+        ("All Jobs", len(all_jobs), "cyan"),
+        ("New", sum(j.get("status") == "new" for j in all_jobs), "blue"),
+        ("Matched", sum(j.get("status") == "matched" for j in all_jobs), "yellow"),
+        ("Applied", sum(a.get("status") in applied_statuses for a in all_apps), "green"),
     ]
 
     p_bars = [

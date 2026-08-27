@@ -262,7 +262,7 @@ EMAIL_CONFIG = {
 # ═══════════════════════════════════════════════════════════
 MATCH_CONFIG = {
     "min_score_to_apply": 30,
-    "auto_apply_score": 30,  # Skip approval for high matches
+    "auto_apply_score": 70,  # Immediate approval only for strong matches
     "email_hr_score": 80,  # Email HR directly for 80+ matches
     "weights": {
         "title": 0.25,
