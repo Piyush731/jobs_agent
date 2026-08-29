@@ -767,8 +767,61 @@ def api_stats():
     if not db:
         return jsonify({"error": "db unavailable"}), 500
     try:
+        # Get all data with a single call each
+        all_jobs = db.get_jobs(limit=5000)
+        all_apps = db.get_applications(limit=5000)
+        all_emails = db.get_emails(limit=5000)
+
+        application_statuses = {
+            "submitted",
+            "viewed",
+            "shortlisted",
+            "interview",
+            "offer",
+        }
+
+        # Build job counts by status
+        job_counts = {}
+        for job in all_jobs:
+            status = job.get("status") or "unknown"
+            job_counts[status] = job_counts.get(status, 0) + 1
+
+        # Build application counts by status
+        application_counts = {}
+        for application in all_apps:
+            status = application.get("status") or "unknown"
+            application_counts[status] = application_counts.get(status, 0) + 1
+
+        # Build comprehensive stats
+        stats = {
+            "jobs": {
+                "total": len(all_jobs),
+                "new": job_counts.get("new", 0),
+                "matched": job_counts.get("matched", 0),
+                "queued": job_counts.get("queued", 0),
+                "applied": job_counts.get("applied", 0),
+                "skipped": job_counts.get("skipped", 0),
+                "expired": job_counts.get("expired", 0),
+            },
+            "applications": {
+                "total": len(all_apps),
+                "submitted": application_counts.get("submitted", 0),
+                "viewed": application_counts.get("viewed", 0),
+                "shortlisted": application_counts.get("shortlisted", 0),
+                "interviews": application_counts.get("interview", 0),
+                "offers": application_counts.get("offer", 0),
+                "rejected": application_counts.get("rejected", 0),
+            },
+            "emails": {
+                "total": len(all_emails),
+                "sent": sum(e.get("status") == "sent" for e in all_emails),
+                "failed": sum(e.get("status") == "failed" for e in all_emails),
+                "replies": sum(bool(e.get("reply_received")) for e in all_emails),
+            },
+        }
+
         return jsonify({
-            "stats": db.get_stats("today") or {},
+            "stats": stats,
             "pipeline": db.get_pipeline() or {},
             "tables": db.get_table_info() or {},
             "timestamp": datetime.now().isoformat(),
