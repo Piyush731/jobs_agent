@@ -1,0 +1,10 @@
+[Unit]
+Description=Job Agent SMTP smoke test
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/job_agent
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/ubuntu/job_agent
+ExecStart=/home/ubuntu/job_agent/venv/bin/python /home/ubuntu/job_agent/scripts/email_smoke_test.py
