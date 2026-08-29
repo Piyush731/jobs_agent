@@ -379,7 +379,7 @@ def jobs_list():
     page = request.args.get("page", 1, type=int)
     per_page = 30
 
-    kwargs = {"limit": per_page * 20}
+    kwargs = {"limit": 5000}
     if fplatform:
         kwargs["platform"] = fplatform
     if fstatus:

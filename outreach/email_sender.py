@@ -266,9 +266,13 @@ class EmailSender:
         Returns:
             send() result dict.
         """
-        to = contact.get("email", "")
+        to = contact.get("email", "").strip()
         if not to:
             return {"success": False, "error": "No contact email"}
+        # Never send to unverified guesses. Hunter/publicly discovered
+        # contacts should carry verified=1; pattern_guess must remain queued.
+        if not bool(contact.get("verified")):
+            return {"success": False, "error": "Contact is not verified; email not sent"}
 
         name = contact.get("name", "")
         title = job.get("title", "the open position")

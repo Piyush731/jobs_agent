@@ -1259,8 +1259,19 @@ class JobMonitor:
                 self.logger.debug("  No HR email found for %s", company)
                 return
 
-            # use first verified or highest-confidence contact
-            contact = contacts[0]
+            # Only use a verified/publicly sourced contact. Never send to
+            # pattern_guess addresses or unrelated Hunter contacts.
+            allowed_prefixes = ("hr", "careers", "career", "talent", "recruit", "hiring", "people")
+            verified = [
+                c for c in contacts
+                if c.get("verified") and
+                (c.get("source") == "hunter.io" or c.get("source") == "job_page") and
+                c.get("email", "").split("@", 1)[0].lower().startswith(allowed_prefixes)
+            ]
+            if not verified:
+                self.logger.info("  No suitable verified recruiting contact for %s", company)
+                return
+            contact = sorted(verified, key=lambda c: c.get("confidence") or 0, reverse=True)[0]
             hr_email = contact.get("email", "")
             if not hr_email:
                 return

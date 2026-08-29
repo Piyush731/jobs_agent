@@ -871,6 +871,14 @@ class LinkedInPlatform(PlatformBase):
             work_mode = "hybrid"
 
         skills = _extract_skills(card_text)
+        closed_markers = (
+            "no longer accepting applications",
+            "applications are closed",
+            "job is no longer available",
+            "this job has expired",
+            "position has been filled",
+        )
+        status = "expired" if any(marker in card_lower for marker in closed_markers) else "new"
 
         return {
             "platform": "linkedin",
@@ -886,6 +894,7 @@ class LinkedInPlatform(PlatformBase):
             "skills": skills,
             "work_mode": work_mode,
             "job_type": "full-time",
+            "status": status,
             "discovered_at": now_iso,
         }
 
